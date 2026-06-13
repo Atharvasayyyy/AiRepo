@@ -26,4 +26,11 @@ router.post("/logout", authMiddleware, authController.logout);
 
 router.get("/profile", authMiddleware, authController.getProfile);
 
+router.put("/profile", authMiddleware,
+    [
+        body('username').optional().notEmpty().withMessage('Username cannot be empty'),
+        body('email').optional().isEmail().withMessage('Valid email is required'),
+        body('password').optional().isLength({min: 6}).withMessage('Password must be at least 6 characters long')
+    ],
+    authController.updateProfile);
 module.exports = router;

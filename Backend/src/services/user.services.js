@@ -1,9 +1,9 @@
 const usermodel = require('../model/user.model');
 
 module.exports.register = async (req, res) => {
-    const { firstName, lastName, email, password } = req.body;
+    const { username , email, password } = req.body;
 
-    if (!firstName || !lastName || !email || !password) {
+    if ( !username || !email || !password) {
         return res.status(400).json({
             message: 'All fields are required'
         });
@@ -12,10 +12,8 @@ module.exports.register = async (req, res) => {
     const hashedPassword = await usermodel.hashPassword(password);
 
     const user = await usermodel.create({
-        fullName: {
-            firstName,
-            lastName
-        },
+        
+        username,
         email,
         password: hashedPassword
     });
