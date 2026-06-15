@@ -119,3 +119,30 @@ exports.deleteWorkspace = async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 };
+
+exports.updateWorkspace = async (req, res) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { workspaceId } = req.params;
+    const { name, description } = req.body;
+    if (!name && !description) {
+        return res.status(400).json({ message: "At least one field (name or description) is required to update" });
+    }
+    if (!workspaceId) {
+        return res.status(400).json({ message: "Workspace ID is required" });
+    }
+    try {
+        const workspace = await workspaceService.updateWorkspace(workspaceId, req.body);
+        if (!workspace) {
+            return res.status(404).json({ message: "Workspace not found" });
+        }
+        res.json({ message: "Workspace updated successfully", workspace });
+    } catch (error) {
+        res.status(500).json({ message: "Server error" });
+    }
+};
+    

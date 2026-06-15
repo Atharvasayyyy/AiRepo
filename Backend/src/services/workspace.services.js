@@ -40,3 +40,7 @@ module.exports.getWorkspaceById = async (workspaceId) => {
 module.exports.deleteWorkspace = async (workspaceId) => {
     return workspaceModel.findByIdAndDelete(workspaceId);
 };
+
+module.exports.updateWorkspace = async (workspaceId, updateData) => {
+    return workspaceModel.findByIdAndUpdate(workspaceId, updateData, { new: true });
+};
