@@ -18,7 +18,10 @@ export async function apiRequest(path, options = {}) {
 
   if (!response.ok) {
     const message = typeof data === 'string' ? data : data?.message || data?.error || 'Request failed'
-    throw new Error(message)
+    const error = new Error(message)
+    error.status = response.status
+    error.body = data
+    throw error
   }
 
   return data
