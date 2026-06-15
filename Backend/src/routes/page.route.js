@@ -9,7 +9,7 @@ router.post(
     [
         body("title").notEmpty().withMessage("Title is required"),
         body("workspace").notEmpty().withMessage("Workspace is required"),
-        body("content").optional(),
+        body("content").optional().isString().withMessage("Content must be a string"),
         body("isArchived").optional().isBoolean().withMessage("isArchived must be a boolean")
     ],
     pageController.createPage
@@ -22,10 +22,9 @@ router.put(
     "/:pageId",
     authMiddleware,
     [
-        body("title").notEmpty().withMessage("Title is required"),
-        body("workspace").notEmpty().withMessage("Workspace is required"),
-        body("content").optional(),
-        body("isArchived").optional().isBoolean().withMessage("isArchived must be a boolean")
+        body("title").optional().notEmpty().withMessage("Title cannot be empty"),
+        body("workspace").optional().notEmpty().withMessage("Workspace cannot be empty"),
+        body("content").optional().isString().withMessage("Content must be a string")
     ],
     pageController.updatePage
 );

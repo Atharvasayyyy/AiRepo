@@ -1,9 +1,7 @@
 const router = require("express").Router();
-const User = require("../models/User.model");
-const bcrypt = require("bcrypt");
 const authController = require("../controller/auth.user.controller");
 const authMiddleware = require("../middleware/auth.middleware");
-const {body, validationResult} = require('express-validator');
+const { body } = require('express-validator');
 
 
 //REGISTER
@@ -33,4 +31,6 @@ router.put("/profile", authMiddleware,
         body('password').optional().isLength({min: 6}).withMessage('Password must be at least 6 characters long')
     ],
     authController.updateProfile);
+
+
 module.exports = router;

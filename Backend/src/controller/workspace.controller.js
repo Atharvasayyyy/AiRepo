@@ -1,8 +1,6 @@
 const workspaceModel = require("../model/workspace.model");
-const{validationResult , body} = require("express-validator");
-const workspaceService = require("../service/workspace.service");
-const bycrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
+const { validationResult } = require("express-validator");
+const workspaceService = require("../services/workspace.services");
 
 exports.createWorkspace = async (req, res) => {
     const errors = validationResult(req);
@@ -13,43 +11,33 @@ exports.createWorkspace = async (req, res) => {
 
     const { name, description, members } = req.body;
 
-    const workspace = await workspaceService.createWorkspace({
-        name,
-        description,
-        members
-    });
+    try {
+        const workspace = await workspaceService.createWorkspace({
+            name,
+            description,
+            members,
+            owner: req.user.id
+        });
 
-    await workspace.save();
-
-    res.status(201).json(workspace);
-
-    const token = jwt.sign(
-        { id: workspace._id },
-        process.env.JWT_SECRET,
-        { expiresIn: "1h" }
-    );
-
-    res.json({ token });
+        return res.status(201).json({
+            success: true,
+            message: "Workspace created successfully",
+            workspace
+        });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).json({
+            success: false,
+            message: "Internal Server Error"
+        });
+    }
 };
 
 exports.getDashboard = async (req, res) => {
     try {
-
-        const errors = validationResult(req);
-
-        if (!errors.isEmpty()) {
-            return res.status(400).json({
-                success: false,
-                errors: errors.array()
-            });
-        }
-
         const userId = req.user.id;
 
-        const workspaces =
-            await workspaceService.getWorkspacesByUserId(
-                userId
-            );
+        const workspaces = await workspaceService.getWorkspacesByUserId(userId);
 
         if (!workspaces || workspaces.length === 0) {
             return res.status(404).json({
@@ -79,13 +67,16 @@ exports.getDashboard = async (req, res) => {
 
 exports.getWorkspaceById = async (req, res) => {
     try {
-
         const { workspaceId } = req.params;
 
-        const workspace =
-            await workspaceService.getWorkspaceById(
-                workspaceId
-            );
+        if (!workspaceId) {
+            return res.status(400).json({
+                success: false,
+                message: "Workspace ID is required"
+            });
+        }
+
+        const workspace = await workspaceService.getWorkspaceById(workspaceId);
 
         if (!workspace) {
             return res.status(404).json({
@@ -112,13 +103,11 @@ exports.getWorkspaceById = async (req, res) => {
 };
 
 exports.deleteWorkspace = async (req, res) => {
-    const errors = validationResult(req);
-
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
-    }
-
     const { workspaceId } = req.params;
+
+    if (!workspaceId) {
+        return res.status(400).json({ message: "Workspace ID is required" });
+    }
 
     try {
         const workspace = await workspaceService.deleteWorkspace(workspaceId);

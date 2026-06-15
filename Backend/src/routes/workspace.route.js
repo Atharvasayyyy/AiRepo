@@ -1,7 +1,6 @@
 const router = require("express").Router();
-const Workspace = require("../models/workspace.model");
 const authMiddleware = require("../middleware/auth.middleware");
-const {body, validationResult} = require('express-validator');
+const { body } = require('express-validator');
 const workspaceController = require("../controller/workspace.controller");
 
 

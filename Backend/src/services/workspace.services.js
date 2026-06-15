@@ -1,35 +1,42 @@
-const workspaceModel = require("../models/workspace.model");
+const workspaceModel = require("../model/workspace.model");
 
-module.exports.createWorkspace = async (req, res) => {
-    try {
-        const { name, description } = req.body;
+module.exports.createWorkspace = async (workspaceData) => {
+    const members = Array.isArray(workspaceData.members) ? workspaceData.members : [];
 
-        const ownerId = req.user._id;
+    const workspaceMembers = [
+        {
+            user: workspaceData.owner,
+            role: "owner"
+        },
+        ...members
+            .filter((memberId) => memberId && memberId.toString() !== workspaceData.owner.toString())
+            .map((memberId) => ({
+                user: memberId,
+                role: "member"
+            }))
+    ];
 
-        const workspace = await workspaceModel.create({
-            name,
-            description,
+    return workspaceModel.create({
+        name: workspaceData.name,
+        description: workspaceData.description || "",
+        owner: workspaceData.owner,
+        members: workspaceMembers
+    });
+};
 
-            owner: ownerId,
+module.exports.getWorkspacesByUserId = async (userId) => {
+    return workspaceModel.find({
+        $or: [
+            { owner: userId },
+            { "members.user": userId }
+        ]
+    }).sort({ createdAt: -1 });
+};
 
-            members: [
-                {
-                    user: ownerId,
-                    role: "owner"
-                }
-            ]
-        });
+module.exports.getWorkspaceById = async (workspaceId) => {
+    return workspaceModel.findById(workspaceId);
+};
 
-        res.status(201).json({
-            success: true,
-            message: "Workspace created successfully",
-            workspace
-        });
-
-    } catch (error) {
-        res.status(500).json({
-            success: false,
-            message: error.message
-        });
-    }
+module.exports.deleteWorkspace = async (workspaceId) => {
+    return workspaceModel.findByIdAndDelete(workspaceId);
 };

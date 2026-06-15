@@ -1,7 +1,8 @@
 const express = require('express');
 const app = express();
-const userRouter = require('./Routes/user.route');
-const workspaceRouter = require('./Routes/workspace.route');
+const userRouter = require('./routes/user.route');
+const workspaceRouter = require('./routes/workspace.route');
+const PageRouter = require('./routes/page.route');
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -13,5 +14,6 @@ app.use('/test', (req, res) => {
 
 app.use('/api/auth', userRouter);
 app.use('/api/workspace', workspaceRouter);
+app.use('/api/page', PageRouter);
 
 module.exports = app;

@@ -1,4 +1,3 @@
-const pageModel = require("../model/pages.model");
 const { validationResult } = require("express-validator");
 const pageService = require("../services/page.services");
 
@@ -12,9 +11,8 @@ exports.createPage = async (req, res) => {
         const { title, content, workspace } = req.body;
         const createdBy = req.user.id;
         const modifiedBy = req.user.id;
-        const isArchived = false;
 
-        if (!title || !workspace || !createdBy || !modifiedBy || isArchived === undefined) {
+        if (!title || !workspace || !createdBy || !modifiedBy) {
             return res.status(400).json({ error: "Missing required fields" });
         }
 
@@ -24,7 +22,6 @@ exports.createPage = async (req, res) => {
             workspace,
             createdBy,
             modifiedBy,
-            isArchived,
         });
 
         res.status(201).json({ message: "Page created successfully", page });
@@ -46,7 +43,7 @@ exports.getPageById = async (req, res) => {
     }
 
     try {
-        const page = await pageModel.findById(pageId);
+        const page = await pageService.getPageById(pageId);
         if (!page) {
             return res.status(404).json({ error: "Page not found" });
         }
@@ -70,22 +67,28 @@ exports.updatePage = async (req, res) => {
     }
 
     try {
-        const { title, content, workspace, isArchived } = req.body;
+        const { title, content, workspace } = req.body;
         const modifiedBy = req.user.id;
-        if (!title || !workspace || !modifiedBy) {
-            return res.status(400).json({ error: "Missing required fields" });
+        if (!title && !content && !workspace) {
+            return res.status(400).json({ error: "At least one field is required" });
         }
 
-        const updatedPage = await pageModel.findByIdAndUpdate(
-            pageId,
-            { title, content, workspace, modifiedBy},
-            { new: true }
-        );
+        const updatedPage = await pageService.updatePage(pageId, {
+            title,
+            content,
+            workspace,
+            modifiedBy,
+        });
+
+        if (!updatedPage) {
+            return res.status(404).json({ error: "Page not found" });
+        }
+
         res.status(200).json({ message: "Page updated successfully", page: updatedPage });
 
     } catch (error) {
         console.error("Error updating page:", error);
-        res.status(500).json({ error: "Internal server error" });
+        res.status(500).json({ error: error.message || "Internal server error" });
     }
 };
 
@@ -101,7 +104,7 @@ exports.deletePage = async (req, res) => {
     }
 
     try {
-        const deletedPage = await pageModel.findByIdAndDelete(pageId);
+        const deletedPage = await pageService.deletePage(pageId);
         if (!deletedPage) {
             return res.status(404).json({ error: "Page not found" });
         }
@@ -125,11 +128,10 @@ exports.archivePage = async (req, res) => {
     }
 
     try {
-        const archivedPage = await pageModel.findByIdAndUpdate(
-            pageId,
-            { isArchived: true },
-            { new: true }
-        );
+        const archivedPage = await pageService.archivePage(pageId);
+        if (!archivedPage) {
+            return res.status(404).json({ error: "Page not found" });
+        }
         res.status(200).json({ message: "Page archived successfully", page: archivedPage });
     } catch (error) {
         console.error("Error archiving page:", error);
@@ -149,15 +151,15 @@ exports.unarchivePage = async (req, res) => {
     }
 
     try {
-        const unarchivedPage = await pageModel.findByIdAndUpdate(
-            pageId,
-            { isArchived: false },
-            { new: true }
-        );
+        const unarchivedPage = await pageService.unarchivePage(pageId);
+        if (!unarchivedPage) {
+            return res.status(404).json({ error: "Page not found" });
+        }
         res.status(200).json({ message: "Page unarchived successfully", page: unarchivedPage });
     } catch (error) {
         console.error("Error unarchiving page:", error);
         res.status(500).json({ error: "Internal server error" });
     }
 };
+
 
