@@ -34,26 +34,60 @@ async function ensureWorkspaceMember(workspaceId, userId) {
 
 exports.sendMessage = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() });
+        return res.status(400).json({
+            errors: errors.array()
+        });
     }
 
     try {
-        const message = await dessesionService.createMessage({
-            content: req.body.content,
-            workspace: req.params.workspaceId,
-            sender: req.user._id,
-            type: req.body.type || 'message',
-            mentions: req.body.mentions || [],
-            replyTo: req.body.replyTo || null,
-            isPinned: req.body.isPinned || false,
-            pinnedBy: req.body.isPinned ? req.user._id : null,
-            pinnedAt: req.body.isPinned ? new Date() : null
+
+        const { content } = req.body;
+
+        // Save user message first
+        const message =
+            await dessesionService.createMessage({
+                content,
+                workspace: req.params.workspaceId,
+                sender: req.user._id,
+                type: "message",
+                mentions: req.body.mentions || [],
+                replyTo: req.body.replyTo || null
+            });
+
+        // AI Mention Logic
+        if (content.includes("@AI")) {
+
+            const aiResponse =
+                await aiService.generateResponse({
+                    workspaceId: req.params.workspaceId,
+                    userMessage: content,
+                    userId: req.user._id
+                });
+
+            await dessesionService.createMessage({
+                content: aiResponse,
+                workspace: req.params.workspaceId,
+                sender: process.env.AI_USER_ID,
+                type: "ai"
+            });
+        }
+
+        return res.status(201).json({
+            success: true,
+            message
         });
 
-        return res.status(201).json({ success: true, message });
     } catch (error) {
-        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
+
+        return res.status(
+            error.statusCode || 500
+        ).json({
+            success: false,
+            message: error.message
+        });
+
     }
 };
 

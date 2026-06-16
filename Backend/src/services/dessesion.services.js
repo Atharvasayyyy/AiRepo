@@ -25,7 +25,6 @@ exports.createMessage = async (messageData) => {
         error.statusCode = 404;
         throw error;
     }
-
     const isMember = existingWorkspace.members.some(
         member => member.user && member.user.toString() === sender.toString()
     );
