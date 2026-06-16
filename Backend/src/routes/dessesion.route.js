@@ -2,6 +2,24 @@ const router = require('express').Router();
 const { body } = require('express-validator');
 const authMiddleware = require('../middleware/auth.middleware');
 const dessesionController = require('../controller/dessesion.controller');
+const discussionModel = require('../model/dessesion.model');
+
+async function attachWorkspaceFromMessage(req, res, next) {
+    try {
+        const message = await discussionModel.findById(req.params.messageId);
+        if (!message) {
+            return res.status(404).json({ success: false, message: 'Message not found' });
+        }
+        req.params.workspaceId = message.workspace.toString();
+        return next();
+    } catch (error) {
+        return res.status(500).json({ success: false, message: error.message });
+    }
+}
+
+router.delete('/messages/:messageId', authMiddleware, attachWorkspaceFromMessage, dessesionController.deleteMessage);
+router.post('/messages/:messageId/pin', authMiddleware, attachWorkspaceFromMessage, dessesionController.pinMessage);
+router.post('/messages/:messageId/unpin', authMiddleware, attachWorkspaceFromMessage, dessesionController.unpinMessage);
 
 router.post(
     '/:workspaceId/messages',

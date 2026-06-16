@@ -347,6 +347,33 @@ input {
   position: relative;
 }
 
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.ai-glow {
+  box-shadow: 0 0 40px rgba(0, 85, 255, 0.08);
+}
+
+.presence-pulse {
+  animation: steady-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes steady-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
 .live-pulse::after {
   content: '';
   position: absolute;

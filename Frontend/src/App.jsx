@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { pageHtml } from './pageHtml'
-import { apiRequest, clearToken, readToken, saveToken } from './lib/api'
+import { useAuth } from './hooks/useAuth'
+import { useSocket } from './hooks/useSocket'
+import { useWorkspace } from './hooks/useWorkspace'
+import { useAutosave } from './hooks/useAutosave'
+import { useDebouncedValue } from './hooks/useDebouncedValue'
 
 const routes = {
   '/': 'landing',
@@ -12,31 +17,23 @@ const routes = {
   '/pages/new': 'playground',
 }
 
-function getRoute(pathname = window.location.pathname) {
+function getRoute(pathname = '/') {
   if (pathname.startsWith('/workspaces/')) return 'playground'
   if (pathname.startsWith('/pages/')) return 'playground'
+  if (pathname.startsWith('/profile')) return 'profile'
   return routes[pathname] ?? 'landing'
 }
 
 function App() {
-  const [page, setPage] = useState(getRoute)
-  const [path, setPath] = useState(window.location.pathname)
+  const location = useLocation()
+  const routerNavigate = useNavigate()
+  const page = getRoute(location.pathname)
+  const path = location.pathname
 
-  const navigate = (href) => {
-    window.history.pushState({}, '', href)
-    setPath(window.location.pathname)
-    setPage(getRoute())
+  const navigate = useCallback((href) => {
+    routerNavigate(href)
     window.scrollTo(0, 0)
-  }
-
-  useEffect(() => {
-    const onPopState = () => {
-      setPath(window.location.pathname)
-      setPage(getRoute())
-    }
-    window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
-  }, [])
+  }, [routerNavigate])
 
   const html = useMemo(() => pageHtml[page], [page])
 
@@ -90,24 +87,176 @@ function App() {
 
     document.addEventListener('click', onClick)
     return () => document.removeEventListener('click', onClick)
-  }, [])
+  }, [navigate])
 
   usePageBehavior(page)
 
-  if (page === 'dashboard' || page === 'playground') {
-    return <Playground path={path} navigate={navigate} />
-  }
-
-  return <div dangerouslySetInnerHTML={{ __html: html }} />
+  return (
+    <Routes>
+      <Route path="/" element={<div dangerouslySetInnerHTML={{ __html: html }} />} />
+      <Route path="/login" element={<LoginPage navigate={navigate} />} />
+      <Route path="/signup" element={<RegisterPage navigate={navigate} />} />
+      <Route path="/profile" element={<ProtectedRoute><ProfilePage navigate={navigate} /></ProtectedRoute>} />
+      <Route path="/dashboard" element={<ProtectedRoute><Playground path={path} navigate={navigate} /></ProtectedRoute>} />
+      <Route path="/playground" element={<ProtectedRoute><Playground path={path} navigate={navigate} /></ProtectedRoute>} />
+      <Route path="/workspaces/*" element={<ProtectedRoute><Playground path={path} navigate={navigate} /></ProtectedRoute>} />
+      <Route path="/pages/*" element={<ProtectedRoute><Playground path={path} navigate={navigate} /></ProtectedRoute>} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  )
 }
 
 function usePageBehavior(page) {
   useEffect(() => {
     if (page === 'landing') return runLandingDemo()
-    if (page === 'login') return runLoginPage()
-    if (page === 'signup') return runSignupPage()
     return undefined
   }, [page])
+}
+
+function ProtectedRoute({ children }) {
+  const { isAuthenticated, loading } = useAuth()
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-surface flex items-center justify-center text-on-surface-variant">
+        Loading workspace...
+      </div>
+    )
+  }
+
+  return isAuthenticated ? children : <Navigate to="/login" replace />
+}
+
+function AuthShell({ title, subtitle, children, footer }) {
+  return (
+    <main className="min-h-screen bg-surface flex items-center justify-center px-4 py-10">
+      <section className="w-full max-w-md rounded-2xl border border-outline-variant/40 bg-white p-6 shadow-xl shadow-primary/5">
+        <div className="flex items-center gap-3 mb-8">
+          <span className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center text-white">
+            <span className="material-symbols-outlined">terminal</span>
+          </span>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">{title}</h1>
+            <p className="text-sm text-on-surface-variant">{subtitle}</p>
+          </div>
+        </div>
+        {children}
+        {footer}
+      </section>
+    </main>
+  )
+}
+
+function LoginPage({ navigate }) {
+  const { login, loading, error } = useAuth()
+  const [form, setForm] = useState({ email: '', password: '' })
+  const [status, setStatus] = useState('')
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setStatus('')
+    try {
+      await login(form)
+      navigate('/dashboard')
+    } catch (loginError) {
+      setStatus(loginError.message || 'Login failed')
+    }
+  }
+
+  return (
+    <AuthShell
+      title="Welcome Back"
+      subtitle="Sign in to open your collaborative workspace."
+      footer={<p className="mt-6 text-sm text-center text-on-surface-variant">New here? <button className="font-bold text-primary" type="button" onClick={() => navigate('/signup')}>Create account</button></p>}
+    >
+      <form className="space-y-4" onSubmit={submit}>
+        <AppleInput label="Email" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
+        <AppleInput label="Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} />
+        <SubmitRow busy={loading} status={status || error} label="Login" />
+      </form>
+    </AuthShell>
+  )
+}
+
+function RegisterPage({ navigate }) {
+  const { register, loading, error } = useAuth()
+  const [form, setForm] = useState({ username: '', email: '', password: '' })
+  const [status, setStatus] = useState('')
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setStatus('')
+    try {
+      await register(form)
+      setStatus('Account created. You can log in now.')
+      navigate('/login')
+    } catch (registerError) {
+      setStatus(registerError.message || 'Registration failed')
+    }
+  }
+
+  return (
+    <AuthShell
+      title="Create Account"
+      subtitle="Start with a secure DevNotes profile."
+      footer={<p className="mt-6 text-sm text-center text-on-surface-variant">Already registered? <button className="font-bold text-primary" type="button" onClick={() => navigate('/login')}>Login</button></p>}
+    >
+      <form className="space-y-4" onSubmit={submit}>
+        <AppleInput label="Username" value={form.username} onChange={(username) => setForm({ ...form, username })} />
+        <AppleInput label="Email" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
+        <AppleInput label="Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} />
+        <SubmitRow busy={loading} status={status || error} label="Create Account" />
+      </form>
+    </AuthShell>
+  )
+}
+
+function ProfilePage({ navigate }) {
+  const { user, updateProfile, logout, loading, error } = useAuth()
+  const [form, setForm] = useState({ username: user?.username || '', email: user?.email || '', password: '' })
+  const [status, setStatus] = useState('')
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setForm({ username: user?.username || '', email: user?.email || '', password: '' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [user])
+
+  const submit = async (event) => {
+    event.preventDefault()
+    setStatus('')
+    try {
+      await updateProfile({
+        username: form.username,
+        email: form.email,
+        ...(form.password ? { password: form.password } : {}),
+      })
+      setStatus('Profile updated.')
+    } catch (profileError) {
+      setStatus(profileError.message || 'Profile update failed')
+    }
+  }
+
+  return (
+    <AuthShell
+      title="Profile Settings"
+      subtitle="Update your account details."
+      footer={
+        <div className="mt-6 flex items-center justify-between text-sm">
+          <button className="font-bold text-primary" type="button" onClick={() => navigate('/dashboard')}>Back to dashboard</button>
+          <button className="font-bold text-[#b42318]" type="button" onClick={async () => { await logout(); navigate('/login') }}>Logout</button>
+        </div>
+      }
+    >
+      <form className="space-y-4" onSubmit={submit}>
+        <AppleInput label="Username" value={form.username} onChange={(username) => setForm({ ...form, username })} />
+        <AppleInput label="Email" type="email" value={form.email} onChange={(email) => setForm({ ...form, email })} />
+        <AppleInput label="New Password" type="password" value={form.password} onChange={(password) => setForm({ ...form, password })} />
+        <SubmitRow busy={loading} status={status || error} label="Update Profile" />
+      </form>
+    </AuthShell>
+  )
 }
 
 function runLandingDemo() {
@@ -251,152 +400,6 @@ function runLandingDemo() {
   }
 }
 
-function runLoginPage() {
-  const cleanup = []
-  const darkToggle = document.querySelector('nav button')
-  const icon = darkToggle?.querySelector('.material-symbols-outlined')
-  const form = document.querySelector('form')
-  const loginBtn = document.querySelector('button.bg-primary')
-  const emailInput = document.querySelector('input[type="email"]')
-  const passwordInput = document.querySelector('input[type="password"]')
-  const statusNode = ensureStatusNode(form)
-
-  const toggleDark = () => {
-    document.documentElement.classList.toggle('dark')
-    if (icon) {
-      icon.textContent = document.documentElement.classList.contains('dark') ? 'light_mode' : 'dark_mode'
-    }
-  }
-  darkToggle?.addEventListener('click', toggleDark)
-  cleanup.push(() => darkToggle?.removeEventListener('click', toggleDark))
-
-  document.querySelectorAll('input').forEach((input) => {
-    const label = input.closest('.space-y-2')?.querySelector('label')
-    const focus = () => label?.classList.replace('text-on-surface-variant', 'text-primary')
-    const blur = () => label?.classList.replace('text-primary', 'text-on-surface-variant')
-    input.addEventListener('focus', focus)
-    input.addEventListener('blur', blur)
-    cleanup.push(() => {
-      input.removeEventListener('focus', focus)
-      input.removeEventListener('blur', blur)
-    })
-  })
-
-  const submit = async (event) => {
-    event.preventDefault()
-    if (!loginBtn) return
-
-    const email = emailInput?.value?.trim() || ''
-    const password = passwordInput?.value || ''
-    if (!email || !password) {
-      setStatus(statusNode, 'Email and password are required.', true)
-      return
-    }
-
-    const originalContent = loginBtn.innerHTML
-    loginBtn.innerHTML =
-      '<span class="material-symbols-outlined animate-spin" data-icon="progress_activity">progress_activity</span>'
-    loginBtn.disabled = true
-
-    try {
-      const data = await apiRequest('/api/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password }),
-      })
-
-      if (data?.token) {
-        saveToken(data.token)
-      }
-
-      setStatus(statusNode, 'Login successful. Opening your dashboard.', false)
-      window.history.pushState({}, '', '/dashboard')
-      window.dispatchEvent(new PopStateEvent('popstate'))
-    } catch (error) {
-      setStatus(statusNode, error.message || 'Login failed.', true)
-    } finally {
-      loginBtn.innerHTML = originalContent
-      loginBtn.disabled = false
-    }
-  }
-  form?.addEventListener('submit', submit)
-  cleanup.push(() => form?.removeEventListener('submit', submit))
-
-  return () => cleanup.forEach((fn) => fn())
-}
-
-function runSignupPage() {
-  const cleanup = []
-  const darkToggle = document.querySelector('header button')
-  const icon = document.getElementById('dark-mode-icon')
-  const form = document.querySelector('form')
-  const submitBtn = form?.querySelector('button[type="submit"], button:not([type])')
-  const inputs = form ? Array.from(form.querySelectorAll('input')) : []
-  const [nameInput, emailInput, passwordInput] = inputs
-  const statusNode = ensureStatusNode(form)
-
-  const toggleDark = () => {
-    document.documentElement.classList.toggle('dark')
-    if (icon) {
-      icon.textContent = document.documentElement.classList.contains('dark') ? 'light_mode' : 'dark_mode'
-    }
-  }
-  darkToggle?.addEventListener('click', toggleDark)
-  cleanup.push(() => darkToggle?.removeEventListener('click', toggleDark))
-
-  const submit = async (event) => {
-    event.preventDefault()
-    if (!submitBtn) return
-
-    const username = nameInput?.value?.trim() || ''
-    const email = emailInput?.value?.trim() || ''
-    const password = passwordInput?.value || ''
-
-    if (!username || !email || !password) {
-      setStatus(statusNode, 'Name, email, and password are required.', true)
-      return
-    }
-
-    const originalContent = submitBtn.innerHTML
-    submitBtn.disabled = true
-    submitBtn.innerHTML = 'Creating account...'
-
-    try {
-      await apiRequest('/api/auth/register', {
-        method: 'POST',
-        body: JSON.stringify({ username, email, password }),
-      })
-
-      setStatus(statusNode, 'Account created successfully. You can log in now.', false)
-      form.reset()
-      window.history.pushState({}, '', '/login')
-      setTimeout(() => {
-        window.dispatchEvent(new PopStateEvent('popstate'))
-      }, 0)
-    } catch (error) {
-      setStatus(statusNode, error.message || 'Signup failed.', true)
-    } finally {
-      submitBtn.innerHTML = originalContent
-      submitBtn.disabled = false
-    }
-  }
-  form?.addEventListener('submit', submit)
-  cleanup.push(() => form?.removeEventListener('submit', submit))
-
-  const parallax = (event) => {
-    const x = (window.innerWidth - event.pageX * 2) / 100
-    const y = (window.innerHeight - event.pageY * 2) / 100
-
-    document.querySelectorAll('.sketch-annotation').forEach((el) => {
-      const rotate = el.classList.contains('rotate-[-6deg]') ? -6 : 4
-      el.style.transform = `translateX(${x * 2}px) translateY(${y * 2}px) rotate(${rotate}deg)`
-    })
-  }
-  document.addEventListener('mousemove', parallax)
-  cleanup.push(() => document.removeEventListener('mousemove', parallax))
-
-  return () => cleanup.forEach((fn) => fn())
-}
-
 const workspaceRoutes = [
   { method: 'POST', label: 'Create Workspace', href: '/workspaces/new' },
   { method: 'GET', label: 'Dashboard', href: '/dashboard' },
@@ -427,65 +430,148 @@ const initialPage = {
 }
 
 function Playground({ path, navigate }) {
+  const { user, logout: authLogout } = useAuth()
+  const {
+    dashboard,
+    selectedWorkspace,
+    selectedPage,
+    members,
+    messages,
+    pinnedMessages,
+    decisions,
+    onlineUsers,
+    typingUsers,
+    loading,
+    errors,
+    setSelectedWorkspace,
+    loadDashboard,
+    createWorkspace,
+    loadWorkspace,
+    updateWorkspace,
+    deleteWorkspace,
+    loadMembers,
+    inviteMember,
+    updateMemberRole,
+    removeMember,
+    createPage,
+    loadPage,
+    updatePage,
+    deletePage,
+    archivePage,
+    unarchivePage,
+    loadDiscussions,
+    sendMessage,
+    deleteMessage,
+    pinMessage,
+    runSearch,
+    searchResults,
+  } = useWorkspace()
+  const { joinWorkspace, leaveWorkspace, sendRealtimeMessage, typing, stopTyping } = useSocket()
   const [workspace, setWorkspace] = useState(initialWorkspace)
   const [pageForm, setPageForm] = useState(initialPage)
-  const [workspaceList, setWorkspaceList] = useState([])
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('')
   const [pageId, setPageId] = useState('')
-  const [activeDoc, setActiveDoc] = useState({
-    workspaceName: 'Workspace',
-    pageTitle: 'Untitled',
-    pageContent: 'Create a workspace and a page to start writing.',
-  })
   const [status, setStatusMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [modal, setModal] = useState(null)
   const mode = getPlaygroundMode(path)
+  const workspaceList = dashboard.ownedWorkspaces || []
+  const sharedWorkspaces = dashboard.sharedWorkspaces || []
+  const activeWorkspace = selectedWorkspace || workspaceList.find((item) => getId(item) === selectedWorkspaceId) || workspaceList[0] || null
+  const activeWorkspaceId = getId(activeWorkspace) || selectedWorkspaceId
+  const activeDoc = {
+    workspaceName: activeWorkspace?.name || 'Workspace',
+    pageTitle: selectedPage?.title || activeWorkspace?.name || 'Untitled',
+    pageContent: selectedPage?.content || activeWorkspace?.description || 'Create a workspace and a page to start writing.',
+    createdBy: selectedPage?.createdBy,
+    modifiedBy: selectedPage?.modifiedBy,
+    updatedAt: selectedPage?.updatedAt || activeWorkspace?.updatedAt,
+  }
 
-  const loadDashboard = useCallback(async (preferredWorkspaceId = '') => {
-    if (!readToken()) {
-      navigate('/login')
-      return
-    }
+  const savePage = useCallback(
+    async (nextPage) => {
+      if (!pageId) return null
+      return updatePage(pageId, {
+        title: nextPage.title,
+        content: nextPage.content,
+        workspace: nextPage.workspace || activeWorkspaceId,
+      })
+    },
+    [activeWorkspaceId, pageId, updatePage],
+  )
+  const autosave = useAutosave(pageForm, savePage, Boolean(pageId && mode === 'dashboard'))
 
-    setLoading(true)
+  const refreshDashboard = useCallback(async () => {
     try {
-      const dashboard = await authedRequest('/api/workspace/dashboard')
-      const nextWorkspaces = Array.isArray(dashboard?.workspaces) ? dashboard.workspaces : []
-      const selected = nextWorkspaces.find((item) => getId(item) === preferredWorkspaceId) || nextWorkspaces[0] || null
-      const selectedId = getId(selected)
-
-      setWorkspaceList(nextWorkspaces)
-      setSelectedWorkspaceId(selectedId)
-
-      if (selected) {
-        setWorkspace({
-          name: selected.name || initialWorkspace.name,
-          description: selected.description || initialWorkspace.description,
-          members: Array.isArray(selected.members) ? selected.members : [],
-        })
-        setPageForm((current) => ({ ...current, workspace: selectedId }))
-        setActiveDoc({
-          workspaceName: selected.name || 'Workspace',
-          pageTitle: 'Workspace overview',
-          pageContent: selected.description || 'No description added yet.',
-        })
+      const nextDashboard = await loadDashboard()
+      const nextWorkspace = nextDashboard.ownedWorkspaces?.[0] || nextDashboard.sharedWorkspaces?.[0] || null
+      if (nextWorkspace && !activeWorkspaceId) {
+        setSelectedWorkspaceId(getId(nextWorkspace))
+        setSelectedWorkspace(nextWorkspace)
       }
     } catch (error) {
       setStatusMessage(error.message || 'Unable to load dashboard.')
-    } finally {
-      setLoading(false)
     }
-  }, [navigate])
+  }, [activeWorkspaceId, loadDashboard, setSelectedWorkspace])
 
   useEffect(() => {
-    if (mode === 'dashboard') {
-      void loadDashboard(selectedWorkspaceId)
-    }
-  }, [mode, loadDashboard, selectedWorkspaceId])
+    const timer = window.setTimeout(() => {
+      void refreshDashboard()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshDashboard])
 
-  const logout = () => {
-    clearToken()
+  useEffect(() => {
+    if (!activeWorkspaceId) return undefined
+    joinWorkspace(activeWorkspaceId)
+    void loadMembers(activeWorkspaceId)
+    void loadDiscussions(activeWorkspaceId)
+    return () => leaveWorkspace(activeWorkspaceId)
+  }, [activeWorkspaceId, joinWorkspace, leaveWorkspace, loadDiscussions, loadMembers])
+
+  useEffect(() => {
+    if (!path.startsWith('/workspaces/') || path.includes('/new')) return
+    const workspaceId = path.split('/')[2]
+    if (workspaceId && workspaceId !== 'select' && workspaceId !== 'delete') {
+      const timer = window.setTimeout(() => {
+        setSelectedWorkspaceId(workspaceId)
+        void loadWorkspace(workspaceId)
+      }, 0)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
+  }, [loadWorkspace, path])
+
+  useEffect(() => {
+    if (!path.startsWith('/pages/') || path.includes('/new')) return
+    const nextPageId = path.split('/')[2]
+    if (nextPageId && !['select', 'edit', 'delete', 'archive', 'unarchive'].includes(nextPageId)) {
+      const timer = window.setTimeout(() => {
+        setPageId(nextPageId)
+        void loadPage(nextPageId)
+      }, 0)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
+  }, [loadPage, path])
+
+  useEffect(() => {
+    if (selectedPage) {
+      const timer = window.setTimeout(() => {
+        setPageId(getId(selectedPage))
+        setPageForm({
+          title: selectedPage.title || '',
+          content: selectedPage.content || '',
+          workspace: getId(selectedPage.workspace) || activeWorkspaceId,
+        })
+      }, 0)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
+  }, [activeWorkspaceId, selectedPage])
+
+  const logout = async () => {
+    await authLogout()
     navigate('/login')
   }
 
@@ -493,23 +579,12 @@ function Playground({ path, navigate }) {
     event.preventDefault()
     setBusy(true)
     setStatusMessage('')
-
     try {
-      const result = await authedRequest('/api/workspace/create', {
-        method: 'POST',
-        body: JSON.stringify(workspace),
-      })
-      const created = result?.workspace || result
+      const created = await createWorkspace(workspace)
       const nextId = getId(created)
       setSelectedWorkspaceId(nextId)
       setPageForm((current) => ({ ...current, workspace: nextId || '{{workspaceId}}' }))
-      setActiveDoc({
-        workspaceName: workspace.name,
-        pageTitle: 'Workspace overview',
-        pageContent: workspace.description,
-      })
       setStatusMessage('Workspace created.')
-      await loadDashboard(nextId)
       navigate('/dashboard')
     } catch (error) {
       setStatusMessage(error.message || 'Workspace request failed.')
@@ -522,23 +597,13 @@ function Playground({ path, navigate }) {
     event.preventDefault()
     setBusy(true)
     setStatusMessage('')
-
     try {
       const payload = {
         ...pageForm,
-        workspace: pageForm.workspace === '{{workspaceId}}' ? selectedWorkspaceId : pageForm.workspace,
+        workspace: pageForm.workspace === '{{workspaceId}}' ? activeWorkspaceId : pageForm.workspace,
       }
-      const result = await authedRequest('/api/page/create', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      })
-      const created = result?.page || result
+      const created = await createPage(payload)
       setPageId(getId(created))
-      setActiveDoc({
-        workspaceName: workspace.name,
-        pageTitle: created?.title || pageForm.title,
-        pageContent: created?.content || pageForm.content,
-      })
       setStatusMessage('Page created.')
       navigate('/dashboard')
     } catch (error) {
@@ -551,50 +616,41 @@ function Playground({ path, navigate }) {
   const runRouteAction = async () => {
     setBusy(true)
     setStatusMessage('')
-
     try {
       if (path === '/workspaces/select') {
-        if (!selectedWorkspaceId) throw new Error('Select a workspace first.')
-        await authedRequest(`/api/workspace/${selectedWorkspaceId}`)
+        if (!activeWorkspaceId) throw new Error('Select a workspace first.')
+        await loadWorkspace(activeWorkspaceId)
         setStatusMessage('Workspace loaded.')
       }
       if (path === '/workspaces/delete') {
-        if (!selectedWorkspaceId) throw new Error('Select a workspace first.')
-        await authedRequest(`/api/workspace/${selectedWorkspaceId}`, { method: 'DELETE' })
+        if (!activeWorkspaceId) throw new Error('Select a workspace first.')
+        await deleteWorkspace(activeWorkspaceId)
         setStatusMessage('Workspace deleted.')
-        await loadDashboard('')
       }
       if (path === '/pages/select') {
         if (!pageId) throw new Error('Create a page first.')
-        await authedRequest(`/api/page/${pageId}`)
+        await loadPage(pageId)
         setStatusMessage('Page loaded.')
       }
       if (path === '/pages/edit') {
         if (!pageId) throw new Error('Create a page first.')
-        await authedRequest(`/api/page/${pageId}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            title: pageForm.title,
-            content: pageForm.content,
-            workspace: selectedWorkspaceId,
-          }),
-        })
+        await updatePage(pageId, { ...pageForm, workspace: activeWorkspaceId })
         setStatusMessage('Page updated.')
       }
       if (path === '/pages/delete') {
         if (!pageId) throw new Error('Create a page first.')
-        await authedRequest(`/api/page/${pageId}`, { method: 'DELETE' })
+        await deletePage(pageId)
         setStatusMessage('Page deleted.')
       }
       if (path === '/pages/archive') {
         if (!pageId) throw new Error('Create a page first.')
-        await authedRequest(`/api/page/${pageId}/archive`, { method: 'POST' })
+        await archivePage(pageId)
         setStatusMessage('Page archived.')
       }
       if (path === '/pages/unarchive') {
         if (!pageId) throw new Error('Create a page first.')
-        await authedRequest(`/api/page/${pageId}/unarchive`, { method: 'POST' })
-        setStatusMessage('Page unarchived.')
+        await unarchivePage(pageId)
+        setStatusMessage('Page restored.')
       }
     } catch (error) {
       setStatusMessage(error.message || 'Action failed.')
@@ -603,65 +659,123 @@ function Playground({ path, navigate }) {
     }
   }
 
-  const selectedWorkspace = workspaceList.find((item) => getId(item) === selectedWorkspaceId) || null
+  const handleWorkspaceSelect = (nextWorkspace) => {
+    const nextId = getId(nextWorkspace)
+    setSelectedWorkspaceId(nextId)
+    setSelectedWorkspace(nextWorkspace)
+    setWorkspace({
+      name: nextWorkspace.name || initialWorkspace.name,
+      description: nextWorkspace.description || initialWorkspace.description,
+      members: Array.isArray(nextWorkspace.members) ? nextWorkspace.members : [],
+    })
+    setPageForm((current) => ({ ...current, workspace: nextId }))
+  }
 
   return (
-    <div className="h-screen overflow-hidden bg-[#f7f7f8] text-on-surface flex">
-      <WorkspaceSidebar path={path} navigate={navigate} activeDoc={activeDoc} onLogout={logout} />
+    <div className="h-screen overflow-hidden bg-surface text-on-surface flex flex-col lg:flex-row">
+      <WorkspaceSidebar
+        path={path}
+        navigate={navigate}
+        activeDoc={activeDoc}
+        ownedWorkspaces={workspaceList}
+        sharedWorkspaces={sharedWorkspaces}
+        recentPages={dashboard.recentPages}
+        archivedPages={dashboard.archivedPages}
+        favorites={dashboard.favorites}
+        user={user}
+        onLogout={logout}
+        onSearch={runSearch}
+        searchResults={searchResults}
+        onOpenModal={setModal}
+        onSelectWorkspace={handleWorkspaceSelect}
+      />
       <main className="flex-1 min-w-0 flex flex-col bg-white">
-        <WorkspaceTopbar activeDoc={activeDoc} onLogout={logout} />
+        <WorkspaceTopbar activeDoc={activeDoc} user={user} onlineUsers={onlineUsers} autosave={autosave} onLogout={logout} onProfile={() => navigate('/profile')} />
         {mode === 'workspace-new' && (
-          <WorkspaceCreatePanel workspace={workspace} onChange={setWorkspace} onSubmit={submitWorkspace} busy={busy} status={status} />
+          <WorkspaceCreatePanel workspace={workspace} onChange={setWorkspace} onSubmit={submitWorkspace} busy={busy || loading.workspaceCreate} status={status || errors.workspaceCreate} />
         )}
         {mode === 'page-new' && (
           <PageCreatePanel
             pageForm={pageForm}
             workspaceList={workspaceList}
-            workspaceId={selectedWorkspaceId}
+            workspaceId={activeWorkspaceId}
             onChange={setPageForm}
             onWorkspaceSelect={(id) => {
               setSelectedWorkspaceId(id)
               setPageForm((current) => ({ ...current, workspace: id }))
             }}
             onSubmit={submitPage}
-            busy={busy}
-            status={status}
+            busy={busy || loading.pageCreate}
+            status={status || errors.pageCreate}
           />
         )}
         {mode === 'action' && (
-          <RouteActionPanel path={path} workspaceId={selectedWorkspaceId} pageId={pageId} busy={busy} status={status} onRun={runRouteAction} />
+          <RouteActionPanel path={path} workspaceId={activeWorkspaceId} pageId={pageId} busy={busy} status={status} onRun={runRouteAction} />
         )}
         {mode === 'dashboard' && (
           <DashboardHome
             activeDoc={activeDoc}
-            loading={loading}
-            selectedWorkspace={selectedWorkspace}
+            pageForm={pageForm}
+            onPageChange={setPageForm}
+            loading={loading.dashboard}
+            selectedWorkspace={activeWorkspace}
             workspaceList={workspaceList}
-            selectedWorkspaceId={selectedWorkspaceId}
+            sharedWorkspaces={sharedWorkspaces}
+            recentPages={dashboard.recentPages}
+            recentDiscussions={dashboard.recentDiscussions}
+            selectedWorkspaceId={activeWorkspaceId}
             navigate={navigate}
-            onRefresh={() => void loadDashboard(selectedWorkspaceId)}
-            onSelectWorkspace={(nextWorkspace) => {
-              const nextId = getId(nextWorkspace)
-              setSelectedWorkspaceId(nextId)
-              setWorkspace({
-                name: nextWorkspace.name || initialWorkspace.name,
-                description: nextWorkspace.description || initialWorkspace.description,
-                members: Array.isArray(nextWorkspace.members) ? nextWorkspace.members : [],
-              })
-              setPageForm((current) => ({ ...current, workspace: nextId }))
-              setActiveDoc({
-                workspaceName: nextWorkspace.name || 'Workspace',
-                pageTitle: 'Workspace overview',
-                pageContent: nextWorkspace.description || 'No description added yet.',
-              })
-            }}
+            onRefresh={refreshDashboard}
+            onSelectWorkspace={handleWorkspaceSelect}
+            onOpenModal={setModal}
+            onDeletePage={() => pageId && deletePage(pageId)}
+            onArchivePage={() => pageId && archivePage(pageId)}
+            onUnarchivePage={() => pageId && unarchivePage(pageId)}
+            autosave={autosave}
           />
         )}
       </main>
+      <WorkspaceAiPanel
+        workspaceId={activeWorkspaceId}
+        onPrompt={async (prompt) => {
+          if (!activeWorkspaceId) return
+          const message = await sendMessage(activeWorkspaceId, { content: prompt, type: 'message' })
+          sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
+        }}
+      />
+      <DiscussionDrawer
+        workspaceId={activeWorkspaceId}
+        messages={messages}
+        pinnedMessages={pinnedMessages}
+        decisions={decisions}
+        typingUsers={typingUsers}
+        currentUser={user}
+        onSend={async (payload) => {
+          const message = await sendMessage(activeWorkspaceId, payload)
+          sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
+        }}
+        onDelete={(messageId) => deleteMessage(activeWorkspaceId, messageId)}
+        onPin={(messageId, pinned) => pinMessage(activeWorkspaceId, messageId, pinned)}
+        onTyping={() => typing({ workspaceId: activeWorkspaceId, user })}
+        onStopTyping={() => stopTyping({ workspaceId: activeWorkspaceId, user })}
+      />
+      <WorkspaceModals
+        modal={modal}
+        onClose={() => setModal(null)}
+        workspace={activeWorkspace}
+        members={members}
+        busy={loading}
+        errors={errors}
+        onCreateWorkspace={createWorkspace}
+        onUpdateWorkspace={updateWorkspace}
+        onDeleteWorkspace={deleteWorkspace}
+        onInviteMember={inviteMember}
+        onUpdateMemberRole={updateMemberRole}
+        onRemoveMember={removeMember}
+      />
     </div>
   )
 }
-
 function getPlaygroundMode(path) {
   if (path === '/workspaces/new') return 'workspace-new'
   if (path === '/pages/new') return 'page-new'
@@ -669,82 +783,167 @@ function getPlaygroundMode(path) {
   return 'action'
 }
 
-function WorkspaceSidebar({ path, navigate, activeDoc, onLogout }) {
+function WorkspaceSidebar({
+  path,
+  navigate,
+  activeDoc,
+  ownedWorkspaces = [],
+  sharedWorkspaces = [],
+  recentPages = [],
+  archivedPages = [],
+  favorites = [],
+  user,
+  onLogout,
+  onSearch,
+  searchResults,
+  onOpenModal,
+  onSelectWorkspace,
+}) {
+  const [query, setQuery] = useState('')
+  const debouncedQuery = useDebouncedValue(query, 400)
+
+  useEffect(() => {
+    if (debouncedQuery) {
+      void onSearch?.(debouncedQuery)
+    }
+  }, [debouncedQuery, onSearch])
+
   return (
-    <aside className="w-64 flex-shrink-0 bg-surface-container-low border-r border-outline-variant flex flex-col transition-all duration-300">
-      <div className="p-4 flex items-center justify-between">
+    <aside className="hidden lg:flex w-[280px] flex-shrink-0 bg-surface-container-low border-r border-outline-variant flex-col z-50">
+      <div className="p-5 flex items-center justify-between">
         <button className="flex items-center gap-2 text-left" type="button" onClick={() => navigate('/dashboard')}>
-          <span className="w-8 h-8 rounded-lg bg-dev-indigo flex items-center justify-center text-white font-bold">
-            D
+          <span className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/20">
+            <span className="material-symbols-outlined text-[20px]">terminal</span>
           </span>
-          <span className="font-headline-md text-body-md font-bold text-on-surface">DevNotes</span>
+          <span className="font-bold text-lg tracking-tight text-on-surface">DevNotes</span>
         </button>
-        <button className="p-1 hover:bg-surface-container-high rounded-lg transition-colors" type="button">
-          <span className="material-symbols-outlined text-[20px] text-on-surface-variant">keyboard_double_arrow_left</span>
+        <button className="p-1.5 hover:bg-surface-container-high rounded-lg transition-colors text-outline" type="button">
+          <span className="material-symbols-outlined text-[20px]">keyboard_double_arrow_left</span>
         </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 space-y-1 no-scrollbar">
-        <div className="mb-4">
-          <SidebarItem active={false} icon="search" label="Search" />
+      <nav className="flex-1 overflow-y-auto px-3 space-y-1 no-scrollbar">
+        <div className="pb-4 border-b border-outline-variant/30 mb-4">
+          <div className="px-3 py-2 rounded-lg bg-white border border-outline-variant/40">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[18px] text-outline">search</span>
+              <input className="min-w-0 flex-1 bg-transparent text-sm outline-none" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} />
+            </div>
+          </div>
+          {searchResults && query && (
+            <div className="mx-3 mt-2 rounded-lg border border-outline-variant/40 bg-white p-2 text-xs text-on-surface-variant">
+              {Object.entries(searchResults).flatMap(([type, values]) => (Array.isArray(values) ? values.map((item) => ({ type, item })) : [])).slice(0, 4).map(({ type, item }) => (
+                <button className="block w-full rounded px-2 py-1 text-left hover:bg-surface-container-low" key={`${type}-${getId(item) || item.title || item.name}`} type="button" onClick={() => navigate(type.includes('page') ? `/pages/${getId(item)}` : `/workspaces/${getId(item)}`)}>
+                  <span className="font-bold capitalize">{type}</span> Â· {item.title || item.name || item.content}
+                </button>
+              ))}
+            </div>
+          )}
           <SidebarItem active={path === '/dashboard' || path === '/playground'} icon="home" label="Home" onClick={() => navigate('/dashboard')} />
-          <SidebarItem active={false} icon="schedule" label="Recent" />
-          <SidebarItem active={false} icon="star" label="Favorites" />
+          <SidebarItem active={false} icon="schedule" label={`Recent (${recentPages.length})`} />
+          <SidebarItem active={false} icon="star" label={`Favorites (${favorites.length})`} />
         </div>
 
-        <div className="mt-6">
-          <h3 className="px-3 text-[11px] font-bold text-outline uppercase tracking-wider mb-2">Workspace</h3>
-          <div className="space-y-0.5">
-            <button
-              className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg transition-colors"
-              type="button"
-              onClick={() => navigate('/dashboard')}
-            >
-              <span className="material-symbols-outlined text-[18px]">keyboard_arrow_down</span>
-              <span className="material-symbols-outlined text-[18px]">folder</span>
-              <span className="text-sm">{activeDoc.workspaceName || 'Engineering'}</span>
+        <div className="space-y-1">
+          <h3 className="px-3 text-[10px] font-bold text-outline uppercase tracking-widest mb-2 flex justify-between items-center">
+            Owned Workspaces
+            <button className="hover:text-primary" type="button" onClick={() => onOpenModal?.('create-workspace')}>
+              <span className="material-symbols-outlined text-[14px]">add</span>
             </button>
+          </h3>
+          <div className="space-y-0.5">
+            {ownedWorkspaces.length === 0 ? (
+              <p className="px-3 py-2 text-xs text-outline">No owned workspaces yet.</p>
+            ) : (
+              ownedWorkspaces.map((workspace) => (
+                <button
+                  className="w-full flex items-center justify-between px-3 py-2 text-on-surface hover:bg-surface-container-high rounded-lg transition-colors group"
+                  key={getId(workspace) || workspace.name}
+                  type="button"
+                  onClick={() => onSelectWorkspace?.(workspace)}
+                >
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="material-symbols-outlined text-[18px] text-outline">keyboard_arrow_down</span>
+                    <span className="material-symbols-outlined text-[18px] text-primary">folder_open</span>
+                    <span className="text-sm font-semibold truncate">{workspace.name}</span>
+                  </span>
+                  <span className="hidden group-hover:flex items-center gap-1 text-outline">
+                    <span className="material-symbols-outlined text-[16px] hover:text-primary" onClick={(event) => { event.stopPropagation(); navigate('/pages/new') }}>add</span>
+                    <span className="material-symbols-outlined text-[16px] hover:text-primary" onClick={(event) => { event.stopPropagation(); onOpenModal?.('workspace-settings') }}>settings</span>
+                  </span>
+                </button>
+              ))
+            )}
             <div className="ml-8 space-y-0.5 mt-0.5">
-              <button
-                className="w-full flex items-center gap-2 px-3 py-1.5 bg-dev-indigo/10 text-dev-indigo rounded-lg text-sm font-medium"
-                type="button"
-                onClick={() => navigate('/dashboard')}
-              >
+              <button className="w-full flex items-center gap-3 px-3 py-1.5 bg-primary/5 text-primary rounded-lg text-sm font-bold" type="button" onClick={() => navigate('/dashboard')}>
                 <span className="material-symbols-outlined text-[18px]">description</span>
-                <span>{activeDoc.pageTitle || 'Roadmap Q4'}</span>
+                <span className="truncate">{activeDoc.pageTitle}</span>
               </button>
-              <button
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors"
-                type="button"
-                onClick={() => navigate('/pages/new')}
-              >
-                <span className="material-symbols-outlined text-[18px]">description</span>
-                <span>API Documentation</span>
+              <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button" onClick={() => onOpenModal?.('members')}>
+                <span className="material-symbols-outlined text-[18px]">group</span>
+                <span>Members</span>
+              </button>
+              <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button">
+                <span className="material-symbols-outlined text-[18px]">forum</span>
+                <span>Discussion</span>
+              </button>
+              <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button">
+                <span className="material-symbols-outlined text-[18px]">gavel</span>
+                <span>Decisions</span>
               </button>
             </div>
-            <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button">
-              <span className="material-symbols-outlined text-[18px]">keyboard_arrow_right</span>
-              <span className="material-symbols-outlined text-[18px]">folder</span>
-              <span>Design System</span>
-            </button>
-            <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button">
-              <span className="material-symbols-outlined text-[18px]">keyboard_arrow_right</span>
-              <span className="material-symbols-outlined text-[18px]">folder</span>
-              <span>Marketing</span>
-            </button>
           </div>
+        </div>
+
+        <div className="mt-6 space-y-1">
+          <h3 className="px-3 text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Shared Workspaces</h3>
+          {sharedWorkspaces.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-outline">No shared workspaces.</p>
+          ) : (
+            sharedWorkspaces.map((workspace) => (
+              <button className="w-full flex items-center gap-2 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" key={getId(workspace) || workspace.name} type="button" onClick={() => onSelectWorkspace?.(workspace)}>
+                <span className="material-symbols-outlined text-[18px]">keyboard_arrow_right</span>
+                <span className="material-symbols-outlined text-[18px]">group</span>
+                <span className="truncate">{workspace.name}</span>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="mt-6 space-y-1">
+          <h3 className="px-3 text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Archived Pages</h3>
+          {archivedPages.length === 0 ? <p className="px-3 py-2 text-xs text-outline">Nothing archived.</p> : archivedPages.map((page) => (
+            <button className="w-full flex items-center gap-2 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" key={getId(page) || page.title} type="button" onClick={() => navigate(`/pages/${getId(page)}`)}>
+              <span className="material-symbols-outlined text-[18px]">archive</span>
+              <span className="truncate">{page.title}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-6 space-y-1">
+          <h3 className="px-3 text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Future</h3>
+          {['Meetings', 'Tasks', 'Presentations', 'Knowledge Base'].map((item) => (
+            <button className="w-full flex items-center gap-2 px-3 py-2 text-outline rounded-lg text-sm" key={item} type="button">
+              <span className="material-symbols-outlined text-[18px]">radio_button_unchecked</span>
+              <span>{item}</span>
+            </button>
+          ))}
         </div>
       </nav>
 
-      <div className="p-4 border-t border-outline-variant">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full border border-outline-variant bg-white flex items-center justify-center font-bold text-dev-indigo">
-            N
+      <div className="p-4 border-t border-outline-variant/30">
+        <div className="flex items-center gap-3 p-2 hover:bg-surface-container rounded-xl cursor-pointer transition-colors group">
+          <div className="relative w-9 h-9 rounded-full border border-outline-variant bg-white flex items-center justify-center font-bold text-primary">
+            {initials(user)}
+            <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold truncate">Nikola T.</p>
-            <p className="text-[11px] text-outline truncate">Pro Plan</p>
+            <p className="text-sm font-bold truncate">{user?.username || 'User'}</p>
+            <p className="text-[11px] text-outline font-medium truncate">{user?.email || 'Active'}</p>
           </div>
+          <button className="text-on-surface-variant hover:text-primary" type="button" onClick={() => navigate('/profile')}>
+            <span className="material-symbols-outlined">settings</span>
+          </button>
           <button className="text-on-surface-variant hover:text-[#b42318]" type="button" onClick={onLogout}>
             <span className="material-symbols-outlined">logout</span>
           </button>
@@ -754,112 +953,222 @@ function WorkspaceSidebar({ path, navigate, activeDoc, onLogout }) {
   )
 }
 
-function SidebarItem({ active, icon, label, method, onClick }) {
+function SidebarItem({ active, icon, label, method, shortcut, onClick }) {
   return (
     <button
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-left transition-colors ${
-        active ? 'bg-white text-on-surface shadow-sm' : 'text-on-surface-variant hover:bg-surface-container-high'
+      className={`w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg text-sm text-left transition-colors ${
+        active ? 'bg-primary/5 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-container-high'
       }`}
       type="button"
       onClick={onClick}
     >
-      {icon ? (
-        <span className="material-symbols-outlined text-[20px]">{icon}</span>
-      ) : (
-        <span className={`w-9 text-[10px] font-bold ${methodClass(method)}`}>{method}</span>
-      )}
-      <span className="truncate">{label}</span>
+      <span className="flex min-w-0 items-center gap-3">
+        {icon ? (
+          <span className="material-symbols-outlined text-[20px]">{icon}</span>
+        ) : (
+          <span className={`w-9 text-[10px] font-bold ${methodClass(method)}`}>{method}</span>
+        )}
+        <span className="truncate">{label}</span>
+      </span>
+      {shortcut && <span className="text-[10px] bg-surface-container px-1.5 py-0.5 rounded border border-outline-variant/50 text-outline">{shortcut}</span>}
     </button>
   )
 }
 
-function WorkspaceTopbar({ activeDoc, onLogout }) {
+function WorkspaceTopbar({ activeDoc, user, onlineUsers = [], autosave, onLogout, onProfile }) {
   return (
-    <header className="h-16 px-8 border-b border-[#ececf0] flex items-center justify-between bg-white">
-      <div className="min-w-0">
-        <p className="text-xs text-on-surface-variant">Workspace</p>
-        <h1 className="font-semibold text-base truncate">{activeDoc.workspaceName}</h1>
-      </div>
-      <div className="flex items-center gap-3">
-        <div className="hidden sm:flex items-center gap-2 text-xs text-on-surface-variant">
-          <span className="w-2 h-2 rounded-full bg-green-500"></span>
-          Saved
+    <header className="h-auto min-h-16 px-4 sm:px-6 border-b border-outline-variant bg-white/95 backdrop-blur-md sticky top-0 z-40 flex flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex items-center gap-4 min-w-0">
+        <button className="lg:hidden w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-white" type="button">
+          <span className="material-symbols-outlined text-[20px]">terminal</span>
+        </button>
+        <div className="min-w-0">
+          <nav className="flex items-center text-[11px] text-outline font-bold uppercase tracking-wider">
+            <span className="truncate">{activeDoc.workspaceName || 'Engineering'}</span>
+            <span className="mx-2 opacity-50">/</span>
+            <span className="text-on-surface truncate">{activeDoc.pageTitle || 'Roadmap Q4'}</span>
+          </nav>
+          <div className="flex items-center gap-2 mt-0.5 min-w-0">
+            <h1 className="text-lg font-bold text-on-surface truncate">{activeDoc.pageTitle || 'Product Roadmap Q4'}</h1>
+            <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 bg-surface-container-high text-outline rounded font-label-mono">v2.4.0</span>
+          </div>
         </div>
-        <button className="px-4 py-2 rounded-xl border border-[#e6e6ea] text-sm font-semibold hover:bg-[#f7f7f8]" type="button" onClick={onLogout}>
-          Logout
+      </div>
+      <div className="flex items-center justify-between md:justify-end gap-3">
+        <div className="hidden lg:flex items-center gap-4 text-xs text-outline">
+          <div className="flex items-center gap-1.5">
+            <span className="material-symbols-outlined text-[16px]">history</span>
+            <span>{activeDoc.updatedAt ? `Updated ${formatDate(activeDoc.updatedAt)}` : 'No updates yet'}</span>
+          </div>
+          <div className="flex items-center gap-1.5 bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium border border-green-100">
+            <span className="w-1.5 h-1.5 rounded-full bg-green-500 presence-pulse"></span>
+            <span>{onlineUsers.length || 1} Online</span>
+          </div>
+          <span>{autosave?.saving ? 'Saving...' : autosave?.savedAt ? `Saved ${autosave.savedAt.toLocaleTimeString()}` : 'Saved'}</span>
+        </div>
+        <div className="hidden sm:flex items-center gap-1 bg-surface-container-low p-1 rounded-lg">
+          <button className="p-1.5 rounded hover:bg-white text-outline hover:text-primary transition-all" title="Tasks" type="button"><span className="material-symbols-outlined text-[18px]">task_alt</span></button>
+          <button className="p-1.5 rounded hover:bg-white text-outline hover:text-primary transition-all" title="Meetings" type="button"><span className="material-symbols-outlined text-[18px]">video_call</span></button>
+          <button className="p-1.5 rounded hover:bg-white text-outline hover:text-primary transition-all" title="Present" type="button"><span className="material-symbols-outlined text-[18px]">present_to_all</span></button>
+        </div>
+        <button className="px-4 py-1.5 bg-primary text-white font-bold rounded-lg hover:shadow-lg hover:shadow-primary/20 transition-all text-sm" type="button">
+          Share
+        </button>
+        <button className="p-2 hover:bg-surface-container rounded-lg text-on-surface-variant transition-colors" title="AI Actions" type="button">
+          <span className="material-symbols-outlined">auto_awesome</span>
+        </button>
+        <button className="hidden sm:flex items-center gap-2 p-1.5 hover:bg-surface-container rounded-lg text-on-surface-variant transition-colors" title="Profile" type="button" onClick={onProfile}>
+          <span className="w-7 h-7 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center">{initials(user)}</span>
+        </button>
+        <button className="lg:hidden p-2 hover:bg-surface-container rounded-lg text-on-surface-variant transition-colors" title="Logout" type="button" onClick={onLogout}>
+          <span className="material-symbols-outlined">logout</span>
         </button>
       </div>
     </header>
   )
 }
 
-function DashboardHome({ activeDoc, loading, workspaceList, selectedWorkspaceId, selectedWorkspace, navigate, onRefresh, onSelectWorkspace }) {
+function DashboardHome({
+  activeDoc,
+  pageForm,
+  onPageChange,
+  loading,
+  workspaceList,
+  sharedWorkspaces,
+  recentPages,
+  recentDiscussions,
+  selectedWorkspaceId,
+  selectedWorkspace,
+  navigate,
+  onRefresh,
+  onSelectWorkspace,
+  onOpenModal,
+  onDeletePage,
+  onArchivePage,
+  onUnarchivePage,
+  autosave,
+}) {
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-6xl mx-auto px-8 py-8 space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-sm text-on-surface-variant mb-2">Dashboard</p>
-            <h2 className="text-3xl font-bold tracking-tight">Your workspaces</h2>
+    <div className="flex-1 overflow-y-auto no-scrollbar scroll-smooth bg-white">
+      <div className="max-w-[860px] mx-auto pt-6 sm:pt-8 px-4 sm:px-8">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-8 p-3 bg-primary/5 rounded-xl border border-primary/10">
+          <div className="flex items-center gap-3 min-w-0">
+            <span className="material-symbols-outlined text-primary text-[20px]">bolt</span>
+            <span className="text-xs font-medium text-primary/80 truncate">
+              {loading ? 'Loading dashboard...' : autosave?.saving ? 'Autosaving page changes...' : autosave?.error || 'Workspace connected to live backend data.'}
+            </span>
           </div>
-          <div className="flex gap-3">
-            <button className="px-4 py-2.5 rounded-xl bg-[#1c1c1e] text-white text-sm font-semibold" type="button" onClick={() => navigate('/workspaces/new')}>
-              New Workspace
-            </button>
-            <button className="px-4 py-2.5 rounded-xl border border-[#e6e6ea] text-sm font-semibold" type="button" onClick={() => navigate('/pages/new')}>
-              New Page
-            </button>
+          <button className="text-xs font-bold text-primary hover:underline self-start sm:self-auto" type="button" onClick={onRefresh}>
+            {loading ? 'Refreshing...' : 'Refresh'}
+          </button>
+        </div>
+
+        <div className="mb-10 p-4 bg-amber-50 border-l-4 border-amber-400 rounded-r-xl flex items-start gap-3">
+          <span className="material-symbols-outlined text-amber-600 mt-0.5">priority_high</span>
+          <div>
+            <h4 className="text-sm font-bold text-amber-900 uppercase tracking-tight">Recent Decisions</h4>
+            <p className="text-sm text-amber-800">Open the discussion drawer to review pinned messages and decisions from the backend.</p>
           </div>
         </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          <section className="rounded-2xl border border-[#e6e6ea] bg-white">
-            <div className="h-14 px-5 border-b border-[#ececf0] flex items-center justify-between">
-              <h3 className="font-semibold">Workspace list</h3>
-              <button className="text-sm text-dev-indigo font-semibold" type="button" onClick={onRefresh}>
-                {loading ? 'Refreshing...' : 'Refresh'}
-              </button>
+        <div className="mb-10 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="flex-1 min-w-0">
+            <input
+              className="w-full bg-transparent font-display-lg text-4xl sm:text-display-lg text-on-surface mb-3 leading-tight outline-none"
+              value={pageForm.title || activeDoc.pageTitle || ''}
+              onChange={(event) => onPageChange((current) => ({ ...current, title: event.target.value }))}
+              placeholder="Untitled page"
+            />
+            <textarea
+              className="w-full min-h-28 resize-none bg-transparent text-body-lg text-on-surface-variant leading-relaxed outline-none"
+              value={pageForm.content || activeDoc.pageContent || ''}
+              onChange={(event) => onPageChange((current) => ({ ...current, content: event.target.value }))}
+              placeholder="Start writing..."
+            />
+            <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-outline">
+              <span>Created by {displayUser(activeDoc.createdBy)}</span>
+              <span>Modified by {displayUser(activeDoc.modifiedBy)}</span>
+              <span>{activeDoc.updatedAt ? `Updated ${formatDate(activeDoc.updatedAt)}` : 'Not saved yet'}</span>
             </div>
-            <div className="divide-y divide-[#ececf0]">
-              {workspaceList.length === 0 ? (
-                <div className="p-8 text-sm text-on-surface-variant">No workspaces yet. Create one to begin.</div>
-              ) : (
-                workspaceList.map((item) => {
-                  const id = getId(item)
-                  const active = id === selectedWorkspaceId
-                  return (
-                    <button
-                      className={`w-full text-left p-5 flex items-center justify-between gap-4 hover:bg-[#fafafa] ${active ? 'bg-[#f7f7fb]' : ''}`}
-                      key={id || item.name}
-                      type="button"
-                      onClick={() => onSelectWorkspace(item)}
-                    >
-                      <div className="min-w-0">
-                        <p className="font-semibold truncate">{item.name || 'Untitled workspace'}</p>
-                        <p className="text-sm text-on-surface-variant truncate">{item.description || 'No description'}</p>
-                      </div>
-                      <span className="material-symbols-outlined text-outline">chevron_right</span>
-                    </button>
-                  )
-                })
-              )}
-            </div>
-          </section>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <button className="px-4 py-2.5 rounded-lg bg-primary text-white text-sm font-bold" type="button" onClick={() => onOpenModal('create-workspace')}>
+              New Workspace
+            </button>
+            <button className="px-4 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={() => navigate('/pages/new')}>
+              New Page
+            </button>
+            <button className="px-3 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={onArchivePage}>Archive</button>
+            <button className="px-3 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={onUnarchivePage}>Restore</button>
+            <button className="px-3 py-2.5 rounded-lg border border-[#f1b5b5] text-[#b42318] text-sm font-bold" type="button" onClick={onDeletePage}>Delete</button>
+          </div>
+        </div>
 
-          <section className="rounded-2xl border border-[#e6e6ea] bg-white p-6">
-            <p className="text-sm text-on-surface-variant mb-2">Selected</p>
-            <h3 className="text-2xl font-bold mb-3">{selectedWorkspace?.name || activeDoc.workspaceName}</h3>
-            <p className="text-sm leading-6 text-on-surface-variant">{selectedWorkspace?.description || activeDoc.pageContent}</p>
-            <div className="mt-6 rounded-xl bg-[#f7f7f8] p-4 text-xs text-on-surface-variant break-all">
-              {selectedWorkspaceId || 'No workspace selected'}
+        <div className="my-10 p-5 sm:p-8 bg-surface-container-low rounded-2xl border border-outline-variant/30 relative overflow-hidden group hover:shadow-xl hover:shadow-primary/5 transition-all">
+          <div className="flex items-start gap-5">
+            <div className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/20 flex-shrink-0">
+              <span className="material-symbols-outlined">folder_open</span>
             </div>
-          </section>
+            <div>
+              <h4 className="font-bold text-on-surface text-lg mb-1.5">{selectedWorkspace?.name || 'No workspace selected'}</h4>
+              <p className="text-on-surface-variant leading-relaxed">{selectedWorkspace?.description || 'Create or select a workspace to load pages, members, discussions, pinned messages, and decisions.'}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button className="text-xs font-bold bg-white px-3 py-2 rounded-lg border border-outline-variant" type="button" onClick={() => onOpenModal('workspace-settings')}>Workspace Settings</button>
+                <button className="text-xs font-bold bg-white px-3 py-2 rounded-lg border border-outline-variant" type="button" onClick={() => onOpenModal('members')}>Members</button>
+                <button className="text-xs font-bold bg-white px-3 py-2 rounded-lg border border-outline-variant" type="button" onClick={() => onOpenModal('delete-workspace')}>Delete Workspace</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 mb-12">
+          <ListPanel title="Owned Workspaces" items={workspaceList} empty="No owned workspaces yet." render={(item) => (
+            <button className={`w-full text-left p-4 flex items-center justify-between gap-4 hover:bg-surface-container-low ${getId(item) === selectedWorkspaceId ? 'bg-primary/5 text-primary' : ''}`} type="button" onClick={() => onSelectWorkspace(item)}>
+              <span className="min-w-0">
+                <span className="block font-semibold truncate">{item.name || 'Untitled workspace'}</span>
+                <span className="block text-sm text-on-surface-variant truncate">Owner: {displayUser(item.owner)} · Members: {item.members?.length || 0}</span>
+                <span className="block text-xs text-outline">Updated {formatDate(item.updatedAt)}</span>
+              </span>
+              <span className="material-symbols-outlined text-outline">chevron_right</span>
+            </button>
+          )} />
+          <ListPanel title="Shared Workspaces" items={sharedWorkspaces} empty="No shared workspaces." render={(item) => (
+            <button className="w-full text-left p-4 hover:bg-surface-container-low" type="button" onClick={() => onSelectWorkspace(item)}>
+              <span className="block font-semibold truncate">{item.name || 'Untitled workspace'}</span>
+              <span className="block text-sm text-on-surface-variant truncate">Members: {item.members?.length || 0}</span>
+            </button>
+          )} />
+          <ListPanel title="Recent Pages" items={recentPages} empty="No recent pages from backend." render={(item) => (
+            <button className="w-full text-left p-4 hover:bg-surface-container-low" type="button" onClick={() => navigate(`/pages/${getId(item)}`)}>
+              <span className="block font-semibold truncate">{item.title || 'Untitled page'}</span>
+              <span className="block text-xs text-outline">Updated {formatDate(item.updatedAt)}</span>
+            </button>
+          )} />
+          <ListPanel title="Recent Discussions" items={recentDiscussions} empty="No recent discussions from backend." render={(item) => (
+            <div className="p-4">
+              <span className="block font-semibold truncate">{displayUser(item.sender)}</span>
+              <span className="block text-sm text-on-surface-variant truncate">{item.content}</span>
+            </div>
+          )} />
+        </div>
+
+        <div className="mb-20 rounded-2xl border border-outline-variant bg-[#0d1117] overflow-hidden shadow-2xl">
+          <div className="bg-white/5 px-5 py-3 flex items-center justify-between border-b border-white/10">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500/50"></span>
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-500/50"></span>
+                <span className="w-2.5 h-2.5 rounded-full bg-green-500/50"></span>
+              </div>
+              <span className="text-[11px] font-label-mono text-white/50 uppercase tracking-widest truncate">Live workspace state</span>
+            </div>
+          </div>
+          <pre className="p-5 sm:p-8 font-label-mono text-sm leading-relaxed text-blue-300 overflow-x-auto"><code>{JSON.stringify({ workspaceId: selectedWorkspaceId || null, pageId: activeDoc.pageTitle || null }, null, 2)}</code></pre>
         </div>
       </div>
     </div>
   )
 }
-
 function WorkspaceCreatePanel({ workspace, onChange, onSubmit, busy, status }) {
   return (
     <FormShell title="Create workspace" subtitle="Only the fields your schema needs." method="POST">
@@ -927,25 +1236,40 @@ function RouteActionPanel({ path, workspaceId, pageId, busy, status, onRun }) {
 
 function FormShell({ title, subtitle, method, children }) {
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-8 py-10">
+    <div className="flex-1 overflow-y-auto bg-white">
+      <div className="max-w-3xl mx-auto px-4 sm:px-8 py-10">
         <div className="mb-8">
           <span className={`inline-flex mb-4 text-[11px] font-bold ${methodClass(method)}`}>{method}</span>
           <h2 className="text-3xl font-bold tracking-tight">{title}</h2>
           <p className="mt-2 text-on-surface-variant">{subtitle}</p>
         </div>
-        <div className="rounded-2xl border border-[#e6e6ea] bg-white p-6">{children}</div>
+        <div className="rounded-2xl border border-outline-variant/40 bg-surface-container-low p-5 sm:p-6">{children}</div>
       </div>
     </div>
   )
 }
 
-function AppleInput({ label, value, onChange }) {
+function ListPanel({ title, items, empty, render }) {
+  return (
+    <section className="rounded-2xl border border-outline-variant/40 bg-white overflow-hidden">
+      <div className="h-14 px-5 border-b border-outline-variant/30 flex items-center justify-between">
+        <h3 className="font-semibold">{title}</h3>
+        <span className="text-xs text-outline">{items?.length || 0} total</span>
+      </div>
+      <div className="divide-y divide-outline-variant/20">
+        {items?.length ? items.map((item) => <div key={getId(item) || item.title || item.name || item.content}>{render(item)}</div>) : <div className="p-5 text-sm text-on-surface-variant">{empty}</div>}
+      </div>
+    </section>
+  )
+}
+
+function AppleInput({ label, value, onChange, type = 'text' }) {
   return (
     <label className="block">
       <span className="block text-xs font-semibold text-on-surface-variant mb-2">{label}</span>
       <input
         className="w-full rounded-xl border border-[#e1e1e6] bg-white px-4 py-3 outline-none focus:border-[#1c1c1e]"
+        type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}
       />
@@ -978,7 +1302,7 @@ function SubmitRow({ busy, status, label, onClick }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center gap-4">
       <button
-        className="px-5 py-3 rounded-xl bg-[#1c1c1e] text-white text-sm font-semibold disabled:opacity-60"
+        className="px-5 py-3 rounded-xl bg-primary text-white text-sm font-semibold disabled:opacity-60"
         disabled={busy}
         type={onClick ? 'button' : 'submit'}
         onClick={onClick}
@@ -990,19 +1314,293 @@ function SubmitRow({ busy, status, label, onClick }) {
   )
 }
 
-async function authedRequest(path, options = {}) {
-  const token = readToken()
-  return apiRequest(path, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  })
+function WorkspaceAiPanel({ workspaceId, onPrompt }) {
+  const [ask, setAsk] = useState('')
+  const quickActions = [
+    ['summarize', 'Summarize', '@AI summarize page'],
+    ['playlist_add_check', 'Generate Tasks', '@AI generate tasks'],
+    ['decision_making', 'Extract Decisions', '@AI extract decisions'],
+    ['auto_fix_high', 'Rewrite Content', '@AI rewrite content'],
+    ['edit_note', 'Create Meeting Notes', '@AI create meeting notes'],
+    ['psychology', 'Explain Architecture', '@AI explain architecture'],
+  ]
+
+  const submitPrompt = async (prompt) => {
+    if (!workspaceId || !prompt.trim()) return
+    await onPrompt(prompt.trim())
+    setAsk('')
+  }
+
+  return (
+    <aside className="hidden xl:flex w-[350px] flex-shrink-0 bg-surface border-l border-outline-variant flex-col z-50">
+      <div className="h-16 flex items-center justify-between px-6 border-b border-outline-variant bg-white">
+        <div className="flex items-center gap-2">
+          <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
+          <h3 className="font-bold text-on-surface">AI Workspace Assistant</h3>
+        </div>
+        <button className="p-1.5 hover:bg-surface-container rounded-full text-outline" type="button">
+          <span className="material-symbols-outlined text-[20px]">more_vert</span>
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
+        <div>
+          <h4 className="text-[10px] font-bold text-outline uppercase tracking-widest mb-4">Quick Intelligence</h4>
+          <div className="grid grid-cols-2 gap-3">
+            {quickActions.map(([icon, label, prompt]) => (
+              <button className="flex flex-col items-start p-3 bg-white border border-outline-variant hover:border-primary hover:bg-primary/5 rounded-xl transition-all group" key={label} type="button" onClick={() => submitPrompt(prompt)}>
+                <span className="material-symbols-outlined text-outline group-hover:text-primary mb-2">{icon}</span>
+                <span className="text-xs font-bold">{label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="space-y-4">
+          <h4 className="text-[10px] font-bold text-outline uppercase tracking-widest">Active Context</h4>
+          <div className="p-4 bg-primary/5 rounded-2xl border border-primary/10">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-5 h-5 bg-primary rounded-full flex items-center justify-center">
+                <span className="material-symbols-outlined text-[12px] text-white">smart_toy</span>
+              </div>
+              <span className="text-[11px] font-bold text-primary">AI Assistant</span>
+            </div>
+            <p className="text-xs text-on-surface-variant leading-relaxed">
+              AI requests are sent as normal discussion messages with @AI prompts. Backend responses appear in the discussion stream as AI Assistant messages.
+            </p>
+          </div>
+        </div>
+      </div>
+      <div className="p-6 border-t border-outline-variant bg-white">
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary font-bold text-sm pointer-events-none">@AI</span>
+          <input className="w-full pl-14 pr-12 py-3 bg-surface-container-low border border-outline-variant rounded-2xl focus:ring-2 focus:ring-primary focus:border-primary outline-none text-sm font-medium transition-all" placeholder="Ask anything..." type="text" value={ask} onChange={(event) => setAsk(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void submitPrompt(`@AI ${ask}`) }} />
+          <button className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-primary text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-105 transition-transform" type="button" onClick={() => submitPrompt(`@AI ${ask}`)}>
+            <span className="material-symbols-outlined text-[20px]">arrow_upward</span>
+          </button>
+        </div>
+        <p className="text-[10px] text-outline mt-3 text-center">All AI actions insert prompts into <span className="font-bold text-on-surface">Team Discussion</span>.</p>
+      </div>
+    </aside>
+  )
 }
 
+function DiscussionDrawer({ workspaceId, messages = [], pinnedMessages = [], decisions = [], typingUsers = [], currentUser, onSend, onDelete, onPin, onTyping, onStopTyping }) {
+  const [open, setOpen] = useState(false)
+  const [content, setContent] = useState('')
+  const [replyTo, setReplyTo] = useState(null)
+
+  const submit = async () => {
+    if (!workspaceId || !content.trim()) return
+    await onSend({ content: content.trim(), mentions: extractMentions(content), replyTo: replyTo?._id || null, type: content.startsWith('@AI') ? 'ai' : 'message' })
+    setContent('')
+    setReplyTo(null)
+    onStopTyping?.()
+  }
+
+  return (
+    <div className="hidden md:flex fixed bottom-6 right-6 xl:right-[380px] w-80 bg-white rounded-2xl shadow-2xl border border-outline-variant z-[60] flex-col max-h-[620px] overflow-hidden ai-glow">
+      <button className="flex items-center justify-between p-4 hover:bg-surface-container-low transition-colors w-full text-left" type="button" onClick={() => setOpen((value) => !value)}>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <span className="material-symbols-outlined text-primary">forum</span>
+            <span className="absolute -top-1 -right-1 w-4 h-4 bg-error text-white text-[9px] font-bold rounded-full flex items-center justify-center border-2 border-white">{messages.length}</span>
+          </div>
+          <div>
+            <h3 className="text-sm font-bold text-on-surface">Team Discussion</h3>
+            <p className="text-[10px] text-green-600 font-bold">{typingUsers.length ? `${typingUsers.map(displayUser).join(', ')} typing...` : workspaceId ? 'Live workspace room' : 'Select workspace'}</p>
+          </div>
+        </div>
+        <span className="material-symbols-outlined text-outline">{open ? 'expand_more' : 'expand_less'}</span>
+      </button>
+      {open && (
+        <div className="flex-1 flex flex-col border-t border-outline-variant min-h-0">
+          <div className="p-4 space-y-4 overflow-y-auto no-scrollbar h-96 bg-surface-container-low/30">
+            <SectionBlock title="Pinned" icon="push_pin" items={pinnedMessages} empty="No pinned messages." />
+            <SectionBlock title="Decisions" icon="gavel" items={decisions} empty="No decisions yet." />
+            {messages.length === 0 ? <p className="text-xs text-on-surface-variant">No messages yet.</p> : messages.map((message) => (
+              <div className="flex gap-2" key={message._id || message.createdAt}>
+                <div className={`${message.type === 'ai' || message.content?.startsWith('@AI') ? 'bg-primary' : 'bg-pink-500'} w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold`}>{message.type === 'ai' ? 'AI' : initials(message.sender || currentUser)}</div>
+                <div className={`flex-1 p-3 rounded-2xl rounded-tl-none shadow-sm border border-outline-variant/30 ${message.type === 'ai' ? 'bg-primary/5' : 'bg-white'}`}>
+                  <div className="flex items-center gap-2 mb-1">
+                    <p className="text-[11px] font-bold text-on-surface">{message.type === 'ai' ? 'AI Assistant' : displayUser(message.sender || currentUser)}</p>
+                    <span className="text-[10px] text-outline">{formatDate(message.createdAt)}</span>
+                    {message.isPinned && <span className="text-[9px] font-bold text-primary">Pinned</span>}
+                  </div>
+                  {message.replyTo && <p className="mb-1 text-[10px] text-outline">Replying to {displayUser(message.replyTo.sender)}</p>}
+                  <p className="text-[12px] text-on-surface-variant whitespace-pre-wrap">{message.content}</p>
+                  <div className="mt-2 flex gap-2 text-[10px] font-bold text-outline">
+                    <button type="button" onClick={() => setReplyTo(message)}>Reply</button>
+                    <button type="button" onClick={() => onPin(message._id, message.isPinned)}>{message.isPinned ? 'Unpin' : 'Pin'}</button>
+                    <button type="button" onClick={() => onDelete(message._id)}>Delete</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="p-3 border-t border-outline-variant bg-white space-y-2">
+            {replyTo && <div className="text-[10px] text-outline flex justify-between"><span>Replying to {displayUser(replyTo.sender)}</span><button type="button" onClick={() => setReplyTo(null)}>Cancel</button></div>}
+            <div className="flex items-center gap-2">
+              <input className="flex-1 bg-surface-container px-3 py-2 rounded-xl text-xs outline-none" placeholder="Reply to team or mention @AI..." value={content} onChange={(event) => { setContent(event.target.value); onTyping?.() }} onBlur={onStopTyping} onKeyDown={(event) => { if (event.key === 'Enter') void submit() }} />
+              <button className="p-2 text-primary hover:bg-primary/5 rounded-lg transition-colors" type="button" onClick={submit}><span className="material-symbols-outlined text-[20px]">send</span></button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SectionBlock({ title, icon, items, empty }) {
+  return (
+    <div className="p-2 bg-amber-50 rounded-lg border border-amber-200 text-[11px] space-y-1">
+      <div className="flex items-center gap-2 font-bold text-amber-800">
+        <span className="material-symbols-outlined text-amber-600 text-[14px]">{icon}</span>
+        <span>{title}</span>
+      </div>
+      {items.length === 0 ? <p className="text-amber-800/70">{empty}</p> : items.slice(0, 3).map((item) => <p className="text-amber-800 truncate" key={item._id}>{item.content}</p>)}
+    </div>
+  )
+}
+function WorkspaceModals({
+  modal,
+  onClose,
+  workspace,
+  members,
+  busy,
+  errors,
+  onCreateWorkspace,
+  onUpdateWorkspace,
+  onDeleteWorkspace,
+  onInviteMember,
+  onUpdateMemberRole,
+  onRemoveMember,
+}) {
+  const [workspaceForm, setWorkspaceForm] = useState({ name: '', description: '' })
+  const [inviteForm, setInviteForm] = useState({ email: '', role: 'member' })
+  const workspaceId = getId(workspace)
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setWorkspaceForm({ name: workspace?.name || '', description: workspace?.description || '' })
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [workspace])
+
+  if (!modal) return null
+
+  const submitWorkspace = async (event) => {
+    event.preventDefault()
+    if (modal === 'create-workspace') {
+      await onCreateWorkspace({ ...workspaceForm, members: [] })
+    }
+    if (modal === 'workspace-settings' && workspaceId) {
+      await onUpdateWorkspace(workspaceId, workspaceForm)
+    }
+    onClose()
+  }
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/20 flex items-center justify-center px-4">
+      <div className="w-full max-w-lg rounded-2xl border border-outline-variant bg-white shadow-2xl overflow-hidden">
+        <div className="h-14 px-5 border-b border-outline-variant/40 flex items-center justify-between">
+          <h3 className="font-bold">
+            {modal === 'create-workspace' && 'Create Workspace'}
+            {modal === 'workspace-settings' && 'Workspace Settings'}
+            {modal === 'delete-workspace' && 'Delete Workspace'}
+            {modal === 'members' && 'Members'}
+          </h3>
+          <button className="p-2 text-outline hover:text-on-surface" type="button" onClick={onClose}>
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+
+        {(modal === 'create-workspace' || modal === 'workspace-settings') && (
+          <form className="p-5 space-y-4" onSubmit={submitWorkspace}>
+            <AppleInput label="Workspace Name" value={workspaceForm.name} onChange={(name) => setWorkspaceForm({ ...workspaceForm, name })} />
+            <AppleTextarea label="Description" value={workspaceForm.description} onChange={(description) => setWorkspaceForm({ ...workspaceForm, description })} />
+            <SubmitRow busy={busy.workspaceCreate || busy.workspaceUpdate} status={errors.workspaceCreate || errors.workspaceUpdate} label={modal === 'create-workspace' ? 'Create Workspace' : 'Save Settings'} />
+          </form>
+        )}
+
+        {modal === 'delete-workspace' && (
+          <div className="p-5 space-y-4">
+            <p className="text-sm text-on-surface-variant">Delete <span className="font-bold text-on-surface">{workspace?.name}</span>? This action calls the workspace delete API.</p>
+            <div className="flex gap-3">
+              <button className="px-4 py-2.5 rounded-lg bg-[#b42318] text-white text-sm font-bold" type="button" onClick={async () => { await onDeleteWorkspace(workspaceId); onClose() }}>Delete</button>
+              <button className="px-4 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={onClose}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {modal === 'members' && (
+          <div className="p-5 space-y-5">
+            <form className="grid gap-3 sm:grid-cols-[1fr_120px_auto]" onSubmit={async (event) => { event.preventDefault(); await onInviteMember(workspaceId, inviteForm); setInviteForm({ email: '', role: 'member' }) }}>
+              <input className="rounded-xl border border-[#e1e1e6] bg-white px-4 py-3 outline-none" placeholder="member@email.com" type="email" value={inviteForm.email} onChange={(event) => setInviteForm({ ...inviteForm, email: event.target.value })} />
+              <select className="rounded-xl border border-[#e1e1e6] bg-white px-3 py-3 outline-none" value={inviteForm.role} onChange={(event) => setInviteForm({ ...inviteForm, role: event.target.value })}>
+                <option value="member">Member</option>
+                <option value="admin">Admin</option>
+              </select>
+              <button className="rounded-xl bg-primary px-4 py-3 text-white text-sm font-bold" type="submit">Invite</button>
+            </form>
+            <div className="max-h-80 overflow-y-auto no-scrollbar divide-y divide-outline-variant/30">
+              {members.length === 0 ? <p className="py-5 text-sm text-on-surface-variant">No members returned by backend.</p> : members.map((member) => {
+                const memberId = member.user?._id || member.user || member._id
+                const role = member.role || 'member'
+                return (
+                  <div className="py-3 flex items-center gap-3" key={memberId}>
+                    <span className="w-9 h-9 rounded-full bg-surface-container-high flex items-center justify-center text-xs font-bold text-primary">{initials(member.user || member)}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold truncate">{displayUser(member.user || member)}</p>
+                      <p className="text-[11px] text-outline capitalize">{role}</p>
+                    </div>
+                    <select className="rounded-lg border border-outline-variant bg-white px-2 py-1 text-xs capitalize" value={role} disabled={role === 'owner'} onChange={(event) => onUpdateMemberRole(workspaceId, memberId, event.target.value)}>
+                      <option value="owner">Owner</option>
+                      <option value="admin">Admin</option>
+                      <option value="member">Member</option>
+                    </select>
+                    <button className="p-2 text-[#b42318] hover:bg-red-50 rounded-lg disabled:opacity-40" type="button" disabled={role === 'owner'} onClick={() => onRemoveMember(workspaceId, memberId)}>
+                      <span className="material-symbols-outlined text-[18px]">delete</span>
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 function getId(item) {
+  if (!item) return ''
+  if (typeof item === 'string') return item
   return item?._id || item?.id || ''
+}
+
+function displayUser(user) {
+  if (!user) return 'Unknown'
+  if (typeof user === 'string') return user
+  return user.username || user.email || user.name || getId(user) || 'Unknown'
+}
+
+function initials(user) {
+  const label = displayUser(user)
+  return label
+    .split(/\s+|@/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || 'U'
+}
+
+function formatDate(value) {
+  if (!value) return 'never'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return 'unknown'
+  return date.toLocaleString()
+}
+
+function extractMentions(content) {
+  return Array.from(content.matchAll(/@([a-zA-Z0-9_.-]+)/g)).map((match) => match[1])
 }
 
 function methodClass(method) {
@@ -1013,24 +1611,9 @@ function methodClass(method) {
   return 'text-outline'
 }
 
-function ensureStatusNode(form) {
-  if (!form) return null
-
-  let status = form.querySelector('[data-auth-status]')
-  if (status) return status
-
-  status = document.createElement('p')
-  status.setAttribute('data-auth-status', 'true')
-  status.className = 'mt-4 text-sm font-medium'
-  status.style.minHeight = '1.25rem'
-  form.insertAdjacentElement('afterend', status)
-  return status
-}
-
-function setStatus(node, message, isError) {
-  if (!node) return
-  node.textContent = message
-  node.style.color = isError ? '#b42318' : '#067647'
-}
-
 export default App
+
+
+
+
+

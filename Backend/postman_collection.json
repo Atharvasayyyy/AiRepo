@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "b1f7c2d4-6b71-4f7e-8d5f-4c9d9c3f9d01",
     "name": "MERN02 Notion API",
-    "description": "Import this collection into Postman to test all backend routes.",
+    "description": "Postman collection for the MERN02 Notion backend. Login stores the JWT in the token collection variable.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -14,15 +14,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/test",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "test"
-              ]
-            }
+            "url": "{{baseUrl}}/test"
           }
         }
       ]
@@ -44,21 +36,25 @@
               "mode": "raw",
               "raw": "{\n  \"username\": \"john_doe\",\n  \"email\": \"john@example.com\",\n  \"password\": \"password123\"\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/register",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "register"
-              ]
-            }
+            "url": "{{baseUrl}}/api/auth/register"
           }
         },
         {
           "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.token) {",
+                  "  pm.collectionVariables.set('token', data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -71,36 +67,8 @@
               "mode": "raw",
               "raw": "{\n  \"email\": \"john@example.com\",\n  \"password\": \"password123\"\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/login",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "login"
-              ]
-            }
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "try {",
-                  "  const data = pm.response.json();",
-                  "  if (data.token) {",
-                  "    pm.environment.set('token', data.token);",
-                  "  }",
-                  "} catch (e) {",
-                  "  console.log('Could not store token:', e);",
-                  "}"
-                ]
-              }
-            }
-          ]
+            "url": "{{baseUrl}}/api/auth/login"
+          }
         },
         {
           "name": "Logout",
@@ -112,17 +80,7 @@
                 "value": "Bearer {{token}}"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/logout",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "logout"
-              ]
-            }
+            "url": "{{baseUrl}}/api/auth/logout"
           }
         },
         {
@@ -135,17 +93,7 @@
                 "value": "Bearer {{token}}"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/profile",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "profile"
-              ]
-            }
+            "url": "{{baseUrl}}/api/auth/profile"
           }
         },
         {
@@ -166,26 +114,30 @@
               "mode": "raw",
               "raw": "{\n  \"username\": \"johnny_doe\",\n  \"email\": \"johnny@example.com\",\n  \"password\": \"newpassword123\"\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/auth/profile",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "profile"
-              ]
-            }
+            "url": "{{baseUrl}}/api/auth/profile"
           }
         }
       ]
     },
     {
-      "name": "Workspace",
+      "name": "Workspaces",
       "item": [
         {
           "name": "Create Workspace",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.workspace && data.workspace._id) {",
+                  "  pm.collectionVariables.set('workspaceId', data.workspace._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
           "request": {
             "method": "POST",
             "header": [
@@ -202,95 +154,11 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"My Workspace\",\n  \"description\": \"Project workspace\",\n  \"members\": []\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/workspace/create",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspace",
-                "create"
-              ]
-            }
+            "url": "{{baseUrl}}/api/workspace"
           }
         },
         {
-          "name": "Get Dashboard",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspace/dashboard",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspace",
-                "dashboard"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Get Workspace By Id",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspace/{{workspaceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspace",
-                "{{workspaceId}}"
-              ]
-            }
-          }
-        },
-        {
-          "name": "Delete Workspace",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{token}}"
-              }
-            ],
-            "url": {
-              "raw": "{{baseUrl}}/api/workspace/{{workspaceId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "workspace",
-                "{{workspaceId}}"
-              ]
-            }
-          }
-        }
-      ]
-    },
-    {
-      "name": "Pages",
-      "item": [
-        {
-          "name": "Create Page",
+          "name": "Create Workspace Legacy",
           "request": {
             "method": "POST",
             "header": [
@@ -305,19 +173,276 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"First Page\",\n  \"content\": \"Page content goes here\",\n  \"workspace\": \"{{workspaceId}}\"\n}"
+              "raw": "{\n  \"name\": \"Legacy Workspace\",\n  \"description\": \"Created through /create\",\n  \"members\": []\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/page/create",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "page",
-                "create"
-              ]
+            "url": "{{baseUrl}}/api/workspace/create"
+          }
+        },
+        {
+          "name": "Get Dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/workspace/dashboard"
+          }
+        },
+        {
+          "name": "Get Workspace By Id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/workspace/{{workspaceId}}"
+          }
+        },
+        {
+          "name": "Update Workspace",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Workspace\",\n  \"description\": \"Updated description\"\n}"
+            },
+            "url": "{{baseUrl}}/api/workspace/{{workspaceId}}"
+          }
+        },
+        {
+          "name": "Delete Workspace",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/workspace/{{workspaceId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Workspace Members",
+      "item": [
+        {
+          "name": "Add Member By Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"member@example.com\",\n  \"role\": \"member\"\n}"
+            },
+            "url": "{{baseUrl}}/api/workspace/{{workspaceId}}/members"
+          }
+        },
+        {
+          "name": "Get Members",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/workspace/{{workspaceId}}/members"
+          }
+        },
+        {
+          "name": "Update Member Role",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"admin\"\n}"
+            },
+            "url": "{{baseUrl}}/api/workspace/{{workspaceId}}/members/{{userId}}"
+          }
+        },
+        {
+          "name": "Remove Member",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/workspace/{{workspaceId}}/members/{{userId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Invites Legacy",
+      "item": [
+        {
+          "name": "Send Invite",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"member@example.com\",\n  \"role\": \"member\"\n}"
+            },
+            "url": "{{baseUrl}}/api/invite/workspaces/{{workspaceId}}/invites"
+          }
+        },
+        {
+          "name": "Get Invites",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/invite/workspaces/{{workspaceId}}/invites"
+          }
+        },
+        {
+          "name": "Update Invite Role",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"admin\"\n}"
+            },
+            "url": "{{baseUrl}}/api/invite/workspaces/{{workspaceId}}/invites/{{userId}}"
+          }
+        },
+        {
+          "name": "Delete Invite",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/invite/workspaces/{{workspaceId}}/invites/{{userId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pages",
+      "item": [
+        {
+          "name": "Create Page",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.page && data.page._id) {",
+                  "  pm.collectionVariables.set('pageId', data.page._id);",
+                  "}"
+                ]
+              }
             }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"First Page\",\n  \"content\": \"Page content goes here\",\n  \"workspace\": \"{{workspaceId}}\",\n  \"isArchived\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/page"
+          }
+        },
+        {
+          "name": "Create Page Legacy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Legacy Page\",\n  \"content\": \"Created through /create\",\n  \"workspace\": \"{{workspaceId}}\"\n}"
+            },
+            "url": "{{baseUrl}}/api/page/create"
           }
         },
         {
@@ -330,17 +455,7 @@
                 "value": "Bearer {{token}}"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/page/{{pageId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "page",
-                "{{pageId}}"
-              ]
-            }
+            "url": "{{baseUrl}}/api/page/{{pageId}}"
           }
         },
         {
@@ -361,17 +476,7 @@
               "mode": "raw",
               "raw": "{\n  \"title\": \"Updated Page Title\",\n  \"content\": \"Updated content\"\n}"
             },
-            "url": {
-              "raw": "{{baseUrl}}/api/page/{{pageId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "page",
-                "{{pageId}}"
-              ]
-            }
+            "url": "{{baseUrl}}/api/page/{{pageId}}"
           }
         },
         {
@@ -384,17 +489,7 @@
                 "value": "Bearer {{token}}"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/page/{{pageId}}",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "page",
-                "{{pageId}}"
-              ]
-            }
+            "url": "{{baseUrl}}/api/page/{{pageId}}"
           }
         },
         {
@@ -407,18 +502,7 @@
                 "value": "Bearer {{token}}"
               }
             ],
-            "url": {
-              "raw": "{{baseUrl}}/api/page/{{pageId}}/archive",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "api",
-                "page",
-                "{{pageId}}",
-                "archive"
-              ]
-            }
+            "url": "{{baseUrl}}/api/page/{{pageId}}/archive"
           }
         },
         {
@@ -431,16 +515,247 @@
                 "value": "Bearer {{token}}"
               }
             ],
+            "url": "{{baseUrl}}/api/page/{{pageId}}/unarchive"
+          }
+        },
+        {
+          "name": "Archive Page Legacy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/page/archive/{{pageId}}"
+          }
+        },
+        {
+          "name": "Unarchive Page Legacy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/page/unarchive/{{pageId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Discussions",
+      "item": [
+        {
+          "name": "Send Message",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const data = pm.response.json();",
+                  "if (data.message && data.message._id) {",
+                  "  pm.collectionVariables.set('messageId', data.message._id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Team update message\",\n  \"type\": \"message\",\n  \"mentions\": [],\n  \"isPinned\": false\n}"
+            },
+            "url": "{{baseUrl}}/api/discussions/{{workspaceId}}/messages"
+          }
+        },
+        {
+          "name": "Send Decision",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Decision: ship the MVP this week\",\n  \"type\": \"decision\",\n  \"mentions\": [],\n  \"isPinned\": true\n}"
+            },
+            "url": "{{baseUrl}}/api/discussions/{{workspaceId}}/messages"
+          }
+        },
+        {
+          "name": "Get Messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/discussions/{{workspaceId}}/messages"
+          }
+        },
+        {
+          "name": "Delete Message",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/discussions/{{workspaceId}}/messages/{{messageId}}"
+          }
+        },
+        {
+          "name": "Delete Message Short Alias",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/discussions/messages/{{messageId}}"
+          }
+        },
+        {
+          "name": "Pin Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/discussions/{{workspaceId}}/messages/{{messageId}}/pin"
+          }
+        },
+        {
+          "name": "Unpin Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/discussions/{{workspaceId}}/messages/{{messageId}}/unpin"
+          }
+        },
+        {
+          "name": "Get Pinned Messages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/discussions/{{workspaceId}}/pinned"
+          }
+        },
+        {
+          "name": "Get Decisions",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/discussions/{{workspaceId}}/decisions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Dessesion Legacy Alias",
+      "item": [
+        {
+          "name": "Get Messages Legacy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/dessesion/{{workspaceId}}/messages"
+          }
+        },
+        {
+          "name": "Get Pinned Legacy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/dessesion/{{workspaceId}}/pinned"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Search",
+      "item": [
+        {
+          "name": "Global Search",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
             "url": {
-              "raw": "{{baseUrl}}/api/page/{{pageId}}/unarchive",
+              "raw": "{{baseUrl}}/api/search?q={{searchQuery}}",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "page",
-                "{{pageId}}",
-                "unarchive"
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "{{searchQuery}}"
+                }
               ]
             }
           }
@@ -464,6 +779,18 @@
     {
       "key": "pageId",
       "value": ""
+    },
+    {
+      "key": "messageId",
+      "value": ""
+    },
+    {
+      "key": "userId",
+      "value": ""
+    },
+    {
+      "key": "searchQuery",
+      "value": "project"
     }
   ]
 }
