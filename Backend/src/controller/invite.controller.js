@@ -1,88 +1,71 @@
-const inviteService = require('../services/invite.services')
-const { validationResult } = require('express-validator')
-const usermodel = require('../model/user.model')
-
+const { validationResult } = require('express-validator');
+const inviteService = require('../services/invite.services');
+const userModel = require('../model/user.model');
 
 exports.sendInvite = async (req, res) => {
-    const errors = validationResult(req)
+    const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() })
-    }
-    const InviteData = {
-        email: req.body.email,
-        role: req.body.role,
-        workspaceId: req.params.workspaceId,
-        senderId: req.user.id
-    }
-    if (InviteData.email === req.user.email) {
-        return res.status(400).json({ success: false, message: "You cannot invite yourself" })
-    }
-   const workspace = await workspaceModel.findById(workspaceId);
-
-    if (!workspace) {
-        return res.status(404).json({
-            success: false,
-            message: "Workspace not found"
-        });
+        return res.status(400).json({ errors: errors.array() });
     }
 
-        if (
-        workspace.owner.toString() !==
-        req.user._id.toString()
-    ) {
-        return res.status(403).json({
-            success: false,
-            message: "Only workspace owner can invite members"
-        });
-    }
     try {
-        const user = await usermodel.findOne({ email: InviteData.email })
+        const user = await userModel.findOne({ email: req.body.email });
+
         if (!user) {
-            return res.status(404).json({ success: false, message: "User with this email does not exist" })
+            return res.status(404).json({ success: false, message: 'User with this email does not exist' });
         }
-        const invite = await inviteService.sendInvite(InviteData)
-        return res.status(200).json({ success: true, message: "Invite sent successfully", invite })
+
+        if (user._id.toString() === req.user._id.toString()) {
+            return res.status(400).json({ success: false, message: 'You cannot invite yourself' });
+        }
+
+        const workspace = await inviteService.createInvite({
+            userId: user._id,
+            role: req.body.role,
+            workspaceId: req.params.workspaceId,
+            senderId: req.user._id
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Member added successfully',
+            workspace
+        });
     } catch (error) {
-        console.error(error)
-        return res.status(500).json({ success: false, message: "Internal Server Error" })
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
-}
+};
 
 exports.getInvites = async (req, res) => {
-    const errors = validationResult(req)
-    if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() })
-    }
-
     try {
-        const invites =
-await inviteService.getInvites(
-    req.params.workspaceId,
-    req.user._id
-);
-        return res.status(200).json({ success: true, invites })
+        const members = await inviteService.getInvites(
+            req.params.workspaceId,
+            req.user._id
+        );
+
+        return res.status(200).json({ success: true, members });
     } catch (error) {
-        console.error(error)
-        return res.status(500).json({ success: false, message: "Internal Server Error" })
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
 exports.updateInvite = async (req, res) => {
-    const errors = validationResult(req)
+    const errors = validationResult(req);
     if (!errors.isEmpty()) {
-        return res.status(400).json({ errors: errors.array() })
+        return res.status(400).json({ errors: errors.array() });
     }
 
     try {
-        const invite = await inviteService.updateInvite(
+        const workspace = await inviteService.updateInvite(
             req.params.workspaceId,
-            req.params.inviteId,
-            req.body
+            req.params.userId,
+            req.body.role,
+            req.user._id
         );
-        return res.status(200).json({ success: true, invite });
+
+        return res.status(200).json({ success: true, workspace });
     } catch (error) {
-        console.error(error);
-        return res.status(500).json({ success: false, message: "Internal Server Error" });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
@@ -90,11 +73,12 @@ exports.deleteInvite = async (req, res) => {
     try {
         await inviteService.deleteInvite(
             req.params.workspaceId,
-            req.params.inviteId
+            req.params.userId,
+            req.user._id
         );
-        return res.status(200).json({ success: true, message: "Invite deleted successfully" });
+
+        return res.status(200).json({ success: true, message: 'Member removed successfully' });
     } catch (error) {
-        console.error(error);
-        return res.status(500).json({ success: false, message: "Internal Server Error" });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };

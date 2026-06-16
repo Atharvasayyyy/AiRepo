@@ -1,175 +1,171 @@
-const dessesionService = require('../service/dessesion.service');
-const dessesionmodel = require('../model/dessesion.model');
-const workspaceModel = require('../models/workspace.model');
 const { validationResult } = require('express-validator');
+const dessesionService = require('../services/dessesion.services');
+const dessesionModel = require('../model/dessesion.model');
+const workspaceModel = require('../model/workspace.model');
+
+const populateMessage = [
+    { path: 'sender', select: 'username email' },
+    { path: 'mentions', select: 'username email' },
+    { path: 'replyTo' },
+    { path: 'pinnedBy', select: 'username email' }
+];
+
+async function ensureWorkspaceMember(workspaceId, userId) {
+    const workspace = await workspaceModel.findById(workspaceId);
+
+    if (!workspace) {
+        const error = new Error('Workspace not found');
+        error.statusCode = 404;
+        throw error;
+    }
+
+    const isMember = workspace.members.some(
+        member => member.user && member.user.toString() === userId.toString()
+    );
+
+    if (!isMember) {
+        const error = new Error('You do not have access to this workspace');
+        error.statusCode = 403;
+        throw error;
+    }
+
+    return workspace;
+}
 
 exports.sendMessage = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
-    const messageData = {
-        content: req.body.content,
-        workspace: req.params.workspaceId,
-        sender: req.user._id,
-        type: req.body.type || "message",
-        mentions: req.body.mentions || [],
-        replyTo: req.body.replyTo || null,
-        isPinned: req.body.isPinned || false,
-        pinnedBy: req.body.pinnedBy || null,
-        pinnedAt: req.body.pinnedAt || null
-    };
-    if (workspaceId !== req.params.workspaceId) {
-        return res.status(403).json({ error: "You do not have access to this workspace" });
-    }
+
     try {
-        const message = await dessesionService.createMessage(messageData);
-        return res.status(201).json(message);
-        console.log(message);
+        const message = await dessesionService.createMessage({
+            content: req.body.content,
+            workspace: req.params.workspaceId,
+            sender: req.user._id,
+            type: req.body.type || 'message',
+            mentions: req.body.mentions || [],
+            replyTo: req.body.replyTo || null,
+            isPinned: req.body.isPinned || false,
+            pinnedBy: req.body.isPinned ? req.user._id : null,
+            pinnedAt: req.body.isPinned ? new Date() : null
+        });
+
+        return res.status(201).json({ success: true, message });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
-exports.getMessages = async (req, res) => { 
-    const workspaceId = req.params.workspaceId;
-    if (workspaceId !== req.params.workspaceId) {
-        return res.status(403).json({ error: "You do not have access to this workspace" });
-    }
-    const isMember = req.user._id;
-    if (!isMember) {
-        return res.status(403).json({ error: "You do not have access to this workspace" });
-    }
+exports.getMessages = async (req, res) => {
     try {
-        const messages = await dessesionmodel.find({ workspace: workspaceId }).populate('sender', 'name email').populate('mentions', 'name email').populate('replyTo').populate('pinnedBy', 'name email');
-        return res.status(200).json(messages);
+        await ensureWorkspaceMember(req.params.workspaceId, req.user._id);
+
+        const messages = await dessesionModel
+            .find({ workspace: req.params.workspaceId })
+            .sort({ createdAt: 1 })
+            .populate(populateMessage);
+
+        return res.status(200).json({ success: true, messages });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
 exports.deleteMessage = async (req, res) => {
-    const workspaceId = req.params.workspaceId;
-    if (workspaceId !== req.params.workspaceId) {
-        return res.status(403).json({ error: "You do not have access to this workspace" });
-    }
-    const isMember = req.user._id;
-    if (!isMember) {
-        return res.status(403).json({ error: "You do not have access to this workspace" });
-    }
     try {
-        const message = await dessesionmodel.findById(req.params.messageId);
+        await ensureWorkspaceMember(req.params.workspaceId, req.user._id);
+
+        const message = await dessesionModel.findOne({
+            _id: req.params.messageId,
+            workspace: req.params.workspaceId
+        });
+
         if (!message) {
-            return res.status(404).json({ error: "Message not found" });
+            return res.status(404).json({ success: false, message: 'Message not found' });
         }
-        await dessesionmodel.findByIdAndDelete(req.params.messageId);
-        return res.status(200).json({ message: "Message deleted successfully" });
+
+        await message.deleteOne();
+        return res.status(200).json({ success: true, message: 'Message deleted successfully' });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
 exports.pinMessage = async (req, res) => {
-    const workspace = req.params.workspaceId;
-        const existingWorkspace =
-            await workspaceModel.findById(
-                workspace
-            );
-    
-        if (!existingWorkspace) {
-            throw new Error(
-                "Workspace not found"
-            );
-        }
-    
-        const isMember =
-            existingWorkspace.members.some(
-                member =>
-                    member.user.toString() ===
-                    sender.toString()
-            );
-    
-        if (!isMember) {
-            throw new Error(
-                "You are not a member of this workspace"
-            );
-        }
-        const message = await dessesionmodel.findById(req.params.messageId);
+    try {
+        await ensureWorkspaceMember(req.params.workspaceId, req.user._id);
+
+        const message = await dessesionModel.findOne({
+            _id: req.params.messageId,
+            workspace: req.params.workspaceId
+        });
+
         if (!message) {
-            return res.status(404).json({ error: "Message not found" });
+            return res.status(404).json({ success: false, message: 'Message not found' });
         }
-        message.pinned = true;
+
+        message.isPinned = true;
+        message.pinnedBy = req.user._id;
+        message.pinnedAt = new Date();
         await message.save();
-        return res.status(200).json({ message: "Message pinned successfully" });
+
+        return res.status(200).json({ success: true, message });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
 exports.unpinMessage = async (req, res) => {
-    const workspace = req.params.workspaceId;
-        const existingWorkspace =
-            await workspaceModel.findById(
-                workspace
-            );
-    
-        if (!existingWorkspace) {
-            throw new Error(
-                "Workspace not found"
-            );
-        }
-    
-        const isMember =
-            existingWorkspace.members.some(
-                member =>
-                    member.user.toString() ===
-                    sender.toString()
-            );
-    
-        if (!isMember) {
-            throw new Error(
-                "You are not a member of this workspace"
-            );
+    try {
+        await ensureWorkspaceMember(req.params.workspaceId, req.user._id);
+
+        const message = await dessesionModel.findOne({
+            _id: req.params.messageId,
+            workspace: req.params.workspaceId
+        });
+
+        if (!message) {
+            return res.status(404).json({ success: false, message: 'Message not found' });
         }
 
-        const message = await dessesionmodel.findById(req.params.messageId);
-        if (!message) {
-            return res.status(404).json({ error: "Message not found" });
-        }
-        message.pinned = false;
+        message.isPinned = false;
+        message.pinnedBy = null;
+        message.pinnedAt = null;
         await message.save();
-        return res.status(200).json({ message: "Message unpinned successfully" });
+
+        return res.status(200).json({ success: true, message });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
     }
 };
 
 exports.getPinnedMessages = async (req, res) => {
-    const workspace = req.params.workspaceId;
+    try {
+        await ensureWorkspaceMember(req.params.workspaceId, req.user._id);
 
-        const existingWorkspace =
-            await workspaceModel.findById(
-                workspace
-            );
-    
-        if (!existingWorkspace) {
-            throw new Error(
-                "Workspace not found"
-            );
-        }
-    
-        const isMember =
-            existingWorkspace.members.some(
-                member =>
-                    member.user.toString() ===
-                    sender.toString()
-            );
-    
-        if (!isMember) {
-            throw new Error(
-                "You are not a member of this workspace"
-            );
-        }
-    const pinnedMessages = await dessesionmodel.find({ workspace: workspace, isPinned: true }).populate('sender', 'name email').populate('mentions', 'name email').populate('replyTo').populate('pinnedBy', 'name email');
-    return res.status(200).json(pinnedMessages);
-}
+        const messages = await dessesionModel
+            .find({ workspace: req.params.workspaceId, isPinned: true })
+            .sort({ pinnedAt: -1 })
+            .populate(populateMessage);
+
+        return res.status(200).json({ success: true, messages });
+    } catch (error) {
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    }
+};
+
+exports.getDecisions = async (req, res) => {
+    try {
+        await ensureWorkspaceMember(req.params.workspaceId, req.user._id);
+
+        const decisions = await dessesionModel
+            .find({ workspace: req.params.workspaceId, type: 'decision' })
+            .sort({ createdAt: -1 })
+            .populate(populateMessage);
+
+        return res.status(200).json({ success: true, decisions });
+    } catch (error) {
+        return res.status(error.statusCode || 500).json({ success: false, message: error.message });
+    }
+};

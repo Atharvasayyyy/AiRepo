@@ -1,13 +1,7 @@
-const discussionModel =
-require("../models/discussion.model");
+const discussionModel = require('../model/dessesion.model');
+const workspaceModel = require('../model/workspace.model');
 
-const workspaceModel =
-require("../models/workspace.model");
-
-exports.createMessage = async (
-    messageData
-) => {
-
+exports.createMessage = async (messageData) => {
     const {
         content,
         workspace,
@@ -20,72 +14,50 @@ exports.createMessage = async (
         pinnedAt
     } = messageData;
 
-    if (
-        !content ||
-        !workspace ||
-        !sender
-    ) {
-        throw new Error(
-            "Content, workspace and sender are required"
-        );
+    if (!content || !workspace || !sender) {
+        throw new Error('Content, workspace and sender are required');
     }
 
-    const existingWorkspace =
-        await workspaceModel.findById(
-            workspace
-        );
+    const existingWorkspace = await workspaceModel.findById(workspace);
 
     if (!existingWorkspace) {
-        throw new Error(
-            "Workspace not found"
-        );
+        const error = new Error('Workspace not found');
+        error.statusCode = 404;
+        throw error;
     }
 
-    const isMember =
-        existingWorkspace.members.some(
-            member =>
-                member.user.toString() ===
-                sender.toString()
-        );
+    const isMember = existingWorkspace.members.some(
+        member => member.user && member.user.toString() === sender.toString()
+    );
 
     if (!isMember) {
-        throw new Error(
-            "You are not a member of this workspace"
-        );
+        const error = new Error('You are not a member of this workspace');
+        error.statusCode = 403;
+        throw error;
     }
 
     if (replyTo) {
-
-        const parentMessage =
-            await discussionModel.findById(
-                replyTo
-            );
+        const parentMessage = await discussionModel.findOne({
+            _id: replyTo,
+            workspace
+        });
 
         if (!parentMessage) {
-            throw new Error(
-                "Parent message not found"
-            );
+            const error = new Error('Parent message not found');
+            error.statusCode = 404;
+            throw error;
         }
     }
 
-    const message =
-        await discussionModel.create({
-            content,
-            workspace,
-            sender,
-            type:
-                type || "message",
-            mentions:
-                mentions || [],
-            replyTo:
-                replyTo || null,
-            isPinned:
-                isPinned || false,
-            pinnedBy:
-                pinnedBy || null,
-            pinnedAt:
-                pinnedAt || null
-        });
-
-    return message;
+    return discussionModel.create({
+        content,
+        workspace,
+        sender,
+        type: type || 'message',
+        mentions: mentions || [],
+        replyTo: replyTo || null,
+        isPinned: isPinned || false,
+        pinnedBy: pinnedBy || null,
+        pinnedAt: pinnedAt || null
+    });
 };

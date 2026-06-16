@@ -1,25 +1,29 @@
-const router = require('express').Router()
-const authMiddleware = require('../middleware/auth.middleware')
-const inviteController = require('../controller/invite.controller')
-const {validaator} = require('express-validator')
+const router = require('express').Router();
+const { body } = require('express-validator');
+const authMiddleware = require('../middleware/auth.middleware');
+const inviteController = require('../controller/invite.controller');
 
-//  to send the invite to the user to join the workspace
-router.post('/workspaces/:workspaceId/invites',
+router.post(
+    '/workspaces/:workspaceId/invites',
+    authMiddleware,
     [
-        check('email').isEmail().withMessage('Valid email is required'),
-        check('role').isIn(['admin', 'member']).withMessage('Role must be either admin or member')
-    ], authMiddleware, inviteController.sendInvite)
+        body('email').isEmail().withMessage('Valid email is required'),
+        body('role').isIn(['admin', 'member']).withMessage('Role must be either admin or member')
+    ],
+    inviteController.sendInvite
+);
 
-// to get the all invite and join the workspace
-router.get('/workspaces/:workspaceId/invites', authMiddleware, inviteController.getInvites)
+router.get('/workspaces/:workspaceId/invites', authMiddleware, inviteController.getInvites);
 
-// to update the role of the invie
-router.put('/workspaces/:workspaceId/invites/:inviteId',
+router.put(
+    '/workspaces/:workspaceId/invites/:userId',
+    authMiddleware,
     [
-        check('role').isIn(['admin', 'member']).withMessage('Role must be either admin or member')
-    ], authMiddleware, inviteController.updateInvite)
+        body('role').isIn(['admin', 'member']).withMessage('Role must be either admin or member')
+    ],
+    inviteController.updateInvite
+);
 
-// to delete the invite
-router.delete('/workspaces/:workspaceId/invites/:inviteId', authMiddleware, inviteController.deleteInvite)
+router.delete('/workspaces/:workspaceId/invites/:userId', authMiddleware, inviteController.deleteInvite);
 
-module.exports = router
+module.exports = router;
