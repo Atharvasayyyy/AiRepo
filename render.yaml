@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: mern02-notion-api
+    runtime: node
+    rootDir: Backend
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /test
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: MISTRAL_API_KEY
+        sync: false
+      - key: AI_USER_ID
+        sync: false
+      - key: CLIENT_URL
+        sync: false

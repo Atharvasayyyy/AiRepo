@@ -10,7 +10,21 @@ const inviteRouter = require('./routes/invite.route');
 const dessesionRouter = require('./routes/dessesion.route');
 const searchRouter = require('./routes/search.route');
 
-app.use(cors());
+const allowedOrigins = process.env.CLIENT_URL
+    ? process.env.CLIENT_URL.split(",").map((origin) => origin.trim()).filter(Boolean)
+    : [];
+
+app.use(cors({
+    origin(origin, callback) {
+        if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error("Not allowed by CORS"));
+    },
+    credentials: true
+}));
 app.use(cookieParser());
 app.use(morgan("dev"));
 app.use(express.json());

@@ -1,0 +1,18 @@
+{
+  "name": "mern02-notion",
+  "private": true,
+  "version": "1.0.0",
+  "description": "MERN Notion clone monorepo",
+  "scripts": {
+    "backend:install": "cd Backend && npm ci",
+    "backend:start": "cd Backend && npm start",
+    "frontend:install": "cd Frontend && npm ci",
+    "frontend:build": "cd Frontend && npm run build",
+    "build": "npm run frontend:build",
+    "start": "npm run backend:start"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  }
+}

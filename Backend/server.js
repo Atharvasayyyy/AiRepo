@@ -1,8 +1,5 @@
 const http = require("http");
 const dotenv = require("dotenv");
-const cors = require("cors");
-const cookieParser = require("cookie-parser");
-const morgan = require("morgan");
 const { Server } = require("socket.io");
 
 dotenv.config();
@@ -10,9 +7,9 @@ dotenv.config();
 const connecttodb = require("./src/db/db");
 const app = require("./src/app");
 
-app.use(cors());
-app.use(cookieParser());
-app.use(morgan("dev"));
+const allowedOrigins = process.env.CLIENT_URL
+    ? process.env.CLIENT_URL.split(",").map((origin) => origin.trim()).filter(Boolean)
+    : [];
 
 connecttodb();
 
@@ -22,7 +19,8 @@ const server = http.createServer(app);
 // Attach Socket.IO
 const io = new Server(server, {
     cors: {
-        origin: "*"
+        origin: allowedOrigins.length > 0 ? allowedOrigins : "*",
+        credentials: true
     }
 });
 
