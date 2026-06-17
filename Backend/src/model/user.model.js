@@ -27,6 +27,24 @@ const UserSchema = new mongoose.Schema(
             type: [String],
             default: [],
         },
+        favoritePages: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "Page"
+            }
+        ],
+        recentPages: [
+            {
+                page: {
+                    type: mongoose.Schema.Types.ObjectId,
+                    ref: "Page"
+                },
+                viewedAt: {
+                    type: Date,
+                    default: Date.now
+                }
+            }
+        ],
     },
     { timestamps: true }
 );

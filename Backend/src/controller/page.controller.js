@@ -55,6 +55,21 @@ exports.getPageById = async (req, res) => {
     }
 };
 
+exports.getPagesByWorkspace = async (req, res) => {
+    const { workspaceId } = req.params;
+    if (!workspaceId) {
+        return res.status(400).json({ error: "Workspace ID is required" });
+    }
+
+    try {
+        const pages = await pageService.getPagesByWorkspace(workspaceId);
+        res.status(200).json({ pages });
+    } catch (error) {
+        console.error("Error fetching workspace pages:", error);
+        res.status(500).json({ error: "Internal server error" });
+    }
+};
+
 exports.updatePage = async (req, res) => {
     const error = validationResult(req);
     if (!error.isEmpty()) {

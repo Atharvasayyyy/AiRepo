@@ -9,6 +9,8 @@ const PageRouter = require('./routes/page.route');
 const inviteRouter = require('./routes/invite.route');
 const dessesionRouter = require('./routes/dessesion.route');
 const searchRouter = require('./routes/search.route');
+const aiRouter = require('./routes/ai.route');
+const pageActivityRouter = require('./routes/pageActivity.route');
 
 const allowedOrigins = process.env.CLIENT_URL
     ? process.env.CLIENT_URL.split(",").map((origin) => origin.trim()).filter(Boolean)
@@ -37,10 +39,13 @@ app.use('/test', (req, res) => {
 
 app.use('/api/auth', userRouter);
 app.use('/api/workspace', workspaceRouter);
+app.use('/api', pageActivityRouter);
 app.use('/api/page', PageRouter);
 app.use('/api/invite', inviteRouter);
+app.use('/api/discussion', dessesionRouter);
 app.use('/api/dessesion', dessesionRouter);
 app.use('/api/discussions', dessesionRouter);
 app.use('/api/search', searchRouter);
+app.use('/api/ai', aiRouter);
 
 module.exports = app;

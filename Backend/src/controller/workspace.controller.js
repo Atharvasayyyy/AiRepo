@@ -38,19 +38,19 @@ exports.getDashboard = async (req, res) => {
         const userId = req.user.id;
 
         const workspaces = await workspaceService.getWorkspacesByUserId(userId);
-
-        if (!workspaces || workspaces.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message:
-                    "No workspaces found for this user"
-            });
-        }
+        const ownedWorkspaces = workspaces.filter(
+            workspace => workspace.owner?._id?.toString() === userId.toString()
+        );
+        const sharedWorkspaces = workspaces.filter(
+            workspace => workspace.owner?._id?.toString() !== userId.toString()
+        );
 
         return res.status(200).json({
             success: true,
             count: workspaces.length,
-            workspaces
+            workspaces,
+            ownedWorkspaces,
+            sharedWorkspaces
         });
 
     } catch (error) {

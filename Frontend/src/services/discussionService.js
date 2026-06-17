@@ -1,55 +1,33 @@
-import { http, requestWithFallback } from '../api/http'
+import { http } from '../api/http'
 
-const specBase = (workspaceId) => `/api/discussions/${workspaceId}`
-const currentBase = (workspaceId) => `/api/dessesion/${workspaceId}`
+const base = (workspaceId) => `/api/discussion/${workspaceId}`
 
 export const discussionService = {
   async sendMessage(workspaceId, payload) {
-    return requestWithFallback(
-      () => http.post(`${specBase(workspaceId)}/messages`, payload),
-      () => http.post(`${currentBase(workspaceId)}/messages`, payload),
-    )
+    return http.post(`${base(workspaceId)}/messages`, payload)
   },
 
   async getMessages(workspaceId) {
-    return requestWithFallback(
-      () => http.get(`${specBase(workspaceId)}/messages`),
-      () => http.get(`${currentBase(workspaceId)}/messages`),
-    )
+    return http.get(`${base(workspaceId)}/messages`)
   },
 
   async deleteMessage(workspaceId, messageId) {
-    return requestWithFallback(
-      () => http.delete(`/api/discussions/messages/${messageId}`),
-      () => http.delete(`${currentBase(workspaceId)}/messages/${messageId}`),
-    )
+    return http.delete(`/api/discussion/messages/${messageId}`)
   },
 
   async pin(workspaceId, messageId) {
-    return requestWithFallback(
-      () => http.post(`/api/discussions/messages/${messageId}/pin`),
-      () => http.post(`${currentBase(workspaceId)}/messages/${messageId}/pin`),
-    )
+    return http.post(`/api/discussion/messages/${messageId}/pin`)
   },
 
   async unpin(workspaceId, messageId) {
-    return requestWithFallback(
-      () => http.post(`/api/discussions/messages/${messageId}/unpin`),
-      () => http.post(`${currentBase(workspaceId)}/messages/${messageId}/unpin`),
-    )
+    return http.post(`/api/discussion/messages/${messageId}/unpin`)
   },
 
   async pinned(workspaceId) {
-    return requestWithFallback(
-      () => http.get(`${specBase(workspaceId)}/pinned`),
-      () => http.get(`${currentBase(workspaceId)}/pinned`),
-    )
+    return http.get(`${base(workspaceId)}/pinned`)
   },
 
   async decisions(workspaceId) {
-    return requestWithFallback(
-      () => http.get(`${specBase(workspaceId)}/decisions`),
-      () => http.get(`${currentBase(workspaceId)}/decisions`),
-    )
+    return http.get(`${base(workspaceId)}/decisions`)
   },
 }

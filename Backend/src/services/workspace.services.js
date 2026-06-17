@@ -30,11 +30,17 @@ module.exports.getWorkspacesByUserId = async (userId) => {
             { owner: userId },
             { "members.user": userId }
         ]
-    }).sort({ createdAt: -1 });
+    })
+        .populate('owner', 'username email')
+        .populate('members.user', 'username email')
+        .sort({ createdAt: -1 });
 };
 
 module.exports.getWorkspaceById = async (workspaceId) => {
-    return workspaceModel.findById(workspaceId);
+    return workspaceModel
+        .findById(workspaceId)
+        .populate('owner', 'username email')
+        .populate('members.user', 'username email');
 };
 
 module.exports.deleteWorkspace = async (workspaceId) => {

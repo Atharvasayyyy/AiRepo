@@ -1,34 +1,34 @@
 import { http, requestWithFallback } from '../api/http'
 
-const specBase = (workspaceId) => `/api/workspace/${workspaceId}/members`
-const currentBase = (workspaceId) => `/api/invite/workspaces/${workspaceId}/invites`
+const base = (workspaceId) => `/api/invite/workspaces/${workspaceId}/invites`
+const memberBase = (workspaceId) => `/api/workspace/${workspaceId}/members`
 
 export const memberService = {
   async invite(workspaceId, payload) {
     return requestWithFallback(
-      () => http.post(specBase(workspaceId), payload),
-      () => http.post(currentBase(workspaceId), payload),
+      () => http.post(base(workspaceId), payload),
+      () => http.post(memberBase(workspaceId), payload),
     )
   },
 
   async list(workspaceId) {
     return requestWithFallback(
-      () => http.get(specBase(workspaceId)),
-      () => http.get(currentBase(workspaceId)),
+      () => http.get(base(workspaceId)),
+      () => http.get(memberBase(workspaceId)),
     )
   },
 
   async updateRole(workspaceId, memberId, payload) {
     return requestWithFallback(
-      () => http.put(`${specBase(workspaceId)}/${memberId}`, payload),
-      () => http.put(`${currentBase(workspaceId)}/${memberId}`, payload),
+      () => http.put(`${base(workspaceId)}/${memberId}`, payload),
+      () => http.put(`${memberBase(workspaceId)}/${memberId}`, payload),
     )
   },
 
   async remove(workspaceId, memberId) {
     return requestWithFallback(
-      () => http.delete(`${specBase(workspaceId)}/${memberId}`),
-      () => http.delete(`${currentBase(workspaceId)}/${memberId}`),
+      () => http.delete(`${base(workspaceId)}/${memberId}`),
+      () => http.delete(`${memberBase(workspaceId)}/${memberId}`),
     )
   },
 }

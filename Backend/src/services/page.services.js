@@ -1,5 +1,14 @@
 const pageModel = require("../model/pages.model");
 
+const pagePopulate = [
+    { path: "workspace", select: "name description owner members", populate: [
+        { path: "owner", select: "username email" },
+        { path: "members.user", select: "username email" }
+    ] },
+    { path: "createdBy", select: "username email" },
+    { path: "modifiedBy", select: "username email" }
+];
+
 exports.createPage = async (pageData) => {
 
     if (
@@ -26,11 +35,18 @@ exports.createPage = async (pageData) => {
             pageData.createdBy
     });
 
-    return page;
+    return page.populate(pagePopulate);
 };
 
 exports.getPageById = async (pageId) => {
-    return pageModel.findById(pageId);
+    return pageModel.findById(pageId).populate(pagePopulate);
+};
+
+exports.getPagesByWorkspace = async (workspaceId) => {
+    return pageModel
+        .find({ workspace: workspaceId, isArchived: false })
+        .sort({ updatedAt: -1 })
+        .populate(pagePopulate);
 };
 
 exports.updatePage = async (pageId, pageData) => {
@@ -56,7 +72,7 @@ exports.updatePage = async (pageId, pageData) => {
         throw new Error("At least one page field is required to update");
     }
 
-    return pageModel.findByIdAndUpdate(pageId, updateFields, { new: true });
+    return pageModel.findByIdAndUpdate(pageId, updateFields, { new: true }).populate(pagePopulate);
 };
 
 exports.deletePage = async (pageId) => {
@@ -64,10 +80,10 @@ exports.deletePage = async (pageId) => {
 };
 
 exports.archivePage = async (pageId) => {
-    return pageModel.findByIdAndUpdate(pageId, { isArchived: true }, { new: true });
+    return pageModel.findByIdAndUpdate(pageId, { isArchived: true }, { new: true }).populate(pagePopulate);
 };
 
 exports.unarchivePage = async (pageId) => {
-    return pageModel.findByIdAndUpdate(pageId, { isArchived: false }, { new: true });
+    return pageModel.findByIdAndUpdate(pageId, { isArchived: false }, { new: true }).populate(pagePopulate);
 };
 

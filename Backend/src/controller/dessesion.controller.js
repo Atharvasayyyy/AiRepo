@@ -2,6 +2,7 @@ const { validationResult } = require('express-validator');
 const dessesionService = require('../services/dessesion.services');
 const dessesionModel = require('../model/dessesion.model');
 const workspaceModel = require('../model/workspace.model');
+const aiService = require('../services/aiservices');
 
 const populateMessage = [
     { path: 'sender', select: 'username email' },
@@ -46,37 +47,35 @@ exports.sendMessage = async (req, res) => {
         const { content } = req.body;
 
         // Save user message first
-        const message =
-            await dessesionService.createMessage({
+        const message = await dessesionService.createMessage({
                 content,
                 workspace: req.params.workspaceId,
                 sender: req.user._id,
                 type: "message",
                 mentions: req.body.mentions || [],
                 replyTo: req.body.replyTo || null
+        });
+
+        let aiMessage = null;
+        if (content.trim().startsWith("@AI")) {
+            const aiResponse = await aiService.generateResponse({
+                userMessage: content,
+                pageContent: req.body.pageContent || "",
+                chatHistory: req.body.chatHistory || ""
             });
 
-        // AI Mention Logic
-        if (content.includes("@AI")) {
-
-            const aiResponse =
-                await aiService.generateResponse({
-                    workspaceId: req.params.workspaceId,
-                    userMessage: content,
-                    userId: req.user._id
-                });
-
-            await dessesionService.createMessage({
+            aiMessage = await dessesionService.createMessage({
                 content: aiResponse,
                 workspace: req.params.workspaceId,
-                sender: process.env.AI_USER_ID,
-                type: "ai"
+                sender: req.user._id,
+                type: "ai_message"
             });
         }
 
         return res.status(201).json({
             success: true,
-            message
+            message,
+            aiMessage
         });
 
     } catch (error) {

@@ -417,14 +417,14 @@ const pageRoutes = [
 ]
 
 const initialWorkspace = {
-  name: 'My Workspace',
-  description: 'Project workspace',
+  name: '',
+  description: '',
   members: [],
 }
 
 const initialPage = {
-  title: 'First Page',
-  content: 'Page content goes here',
+  title: '',
+  content: '',
   workspace: '{{workspaceId}}',
   
 }
@@ -435,6 +435,9 @@ function Playground({ path, navigate }) {
     dashboard,
     selectedWorkspace,
     selectedPage,
+    workspacePages,
+    favorites,
+    recentPages,
     members,
     messages,
     pinnedMessages,
@@ -444,6 +447,7 @@ function Playground({ path, navigate }) {
     loading,
     errors,
     setSelectedWorkspace,
+    setSelectedPage,
     loadDashboard,
     createWorkspace,
     loadWorkspace,
@@ -455,6 +459,7 @@ function Playground({ path, navigate }) {
     removeMember,
     createPage,
     loadPage,
+    loadWorkspacePages,
     updatePage,
     deletePage,
     archivePage,
@@ -465,6 +470,9 @@ function Playground({ path, navigate }) {
     pinMessage,
     runSearch,
     searchResults,
+    runAiAction,
+    aiResult,
+    toggleFavoritePage,
   } = useWorkspace()
   const { joinWorkspace, leaveWorkspace, sendRealtimeMessage, typing, stopTyping } = useSocket()
   const [workspace, setWorkspace] = useState(initialWorkspace)
@@ -481,6 +489,8 @@ function Playground({ path, navigate }) {
   const activeWorkspace = selectedWorkspace || workspaceList.find((item) => getId(item) === selectedWorkspaceId) || workspaceList[0] || null
   const activeWorkspaceId = getId(activeWorkspace) || selectedWorkspaceId
   const activeDoc = {
+    workspaceId: activeWorkspaceId,
+    pageId,
     workspaceName: activeWorkspace?.name || 'Workspace',
     pageTitle: selectedPage?.title || activeWorkspace?.name || 'Untitled',
     pageContent: selectedPage?.content || activeWorkspace?.description || 'Create a workspace and a page to start writing.',
@@ -526,9 +536,10 @@ function Playground({ path, navigate }) {
     if (!activeWorkspaceId) return undefined
     joinWorkspace(activeWorkspaceId)
     void loadMembers(activeWorkspaceId)
+    void loadWorkspacePages(activeWorkspaceId)
     void loadDiscussions(activeWorkspaceId)
     return () => leaveWorkspace(activeWorkspaceId)
-  }, [activeWorkspaceId, joinWorkspace, leaveWorkspace, loadDiscussions, loadMembers])
+  }, [activeWorkspaceId, joinWorkspace, leaveWorkspace, loadDiscussions, loadMembers, loadWorkspacePages])
 
   useEffect(() => {
     if (!path.startsWith('/workspaces/') || path.includes('/new')) return
@@ -557,6 +568,14 @@ function Playground({ path, navigate }) {
   }, [loadPage, path])
 
   useEffect(() => {
+    if (path === '/pages/new') {
+      setPageId('')
+      setSelectedPage(null)
+      setPageForm({ title: '', content: '', workspace: activeWorkspaceId })
+    }
+  }, [activeWorkspaceId, path, setSelectedPage])
+
+  useEffect(() => {
     if (selectedPage) {
       const timer = window.setTimeout(() => {
         setPageId(getId(selectedPage))
@@ -565,6 +584,8 @@ function Playground({ path, navigate }) {
           content: selectedPage.content || '',
           workspace: getId(selectedPage.workspace) || activeWorkspaceId,
         })
+        const nextWorkspaceId = getId(selectedPage.workspace)
+        if (nextWorkspaceId) setSelectedWorkspaceId(nextWorkspaceId)
       }, 0)
       return () => window.clearTimeout(timer)
     }
@@ -604,9 +625,10 @@ function Playground({ path, navigate }) {
         workspace: pageForm.workspace === '{{workspaceId}}' ? activeWorkspaceId : pageForm.workspace,
       }
       const created = await createPage(payload)
-      setPageId(getId(created))
+      const nextPageId = getId(created)
+      setPageId(nextPageId)
       setStatusMessage('Page created.')
-      navigate('/dashboard')
+      navigate(nextPageId ? `/pages/${nextPageId}` : '/dashboard')
     } catch (error) {
       setStatusMessage(error.message || 'Page request failed.')
     } finally {
@@ -670,6 +692,24 @@ function Playground({ path, navigate }) {
       members: Array.isArray(nextWorkspace.members) ? nextWorkspace.members : [],
     })
     setPageForm((current) => ({ ...current, workspace: nextId }))
+    setPageId('')
+    setSelectedPage(null)
+  }
+
+  const handleWorkspaceCreated = async (payload) => {
+    const created = await createWorkspace(payload)
+    const nextId = getId(created)
+    setSelectedWorkspaceId(nextId)
+    setSelectedWorkspace(created)
+    setWorkspace({
+      name: created?.name || payload.name || initialWorkspace.name,
+      description: created?.description || payload.description || initialWorkspace.description,
+      members: Array.isArray(created?.members) ? created.members : [],
+    })
+    setPageForm((current) => ({ ...current, workspace: nextId || current.workspace || '{{workspaceId}}' }))
+    setStatusMessage('Workspace created. Create a page inside it next.')
+    navigate('/dashboard')
+    return created
   }
 
   return (
@@ -679,10 +719,8 @@ function Playground({ path, navigate }) {
         navigate={navigate}
         activeDoc={activeDoc}
         ownedWorkspaces={workspaceList}
+        workspacePages={workspacePages}
         sharedWorkspaces={sharedWorkspaces}
-        recentPages={dashboard.recentPages}
-        archivedPages={dashboard.archivedPages}
-        favorites={dashboard.favorites}
         user={user}
         onLogout={logout}
         onSearch={runSearch}
@@ -711,7 +749,9 @@ function Playground({ path, navigate }) {
             workspaceId={activeWorkspaceId}
             onChange={setPageForm}
             onWorkspaceSelect={(id) => {
-              setSelectedWorkspaceId(id)
+              const nextWorkspace = workspaceList.find((item) => getId(item) === id)
+              if (nextWorkspace) handleWorkspaceSelect(nextWorkspace)
+              else setSelectedWorkspaceId(id)
               setPageForm((current) => ({ ...current, workspace: id }))
             }}
             onSubmit={submitPage}
@@ -719,35 +759,22 @@ function Playground({ path, navigate }) {
             status={status || errors.pageCreate}
           />
         )}
-        {mode === 'action' && (
-          <RouteActionPanel path={path} workspaceId={activeWorkspaceId} pageId={pageId} busy={busy} status={status} onRun={runRouteAction} />
-        )}
         {mode === 'dashboard' && (
           <DashboardHome
             activeDoc={activeDoc}
             pageForm={pageForm}
             onPageChange={setPageForm}
             loading={loading.dashboard}
-            selectedWorkspace={activeWorkspace}
-            workspaceList={workspaceList}
-            sharedWorkspaces={sharedWorkspaces}
-            recentPages={dashboard.recentPages}
-            recentDiscussions={dashboard.recentDiscussions}
             selectedWorkspaceId={activeWorkspaceId}
             navigate={navigate}
             onRefresh={refreshDashboard}
-            onSelectWorkspace={handleWorkspaceSelect}
             onOpenModal={setModal}
             onDeletePage={() => pageId && deletePage(pageId)}
             onArchivePage={() => pageId && archivePage(pageId)}
             onUnarchivePage={() => pageId && unarchivePage(pageId)}
+            onToggleFavorite={() => pageId && toggleFavoritePage(pageId, favorites.some((page) => getId(page) === pageId))}
+            isFavorite={favorites.some((page) => getId(page) === pageId)}
             autosave={autosave}
-            onAskAi={async (prompt) => {
-              if (!activeWorkspaceId) return
-              const message = await sendMessage(activeWorkspaceId, { content: prompt, type: 'message' })
-              sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
-              setHubOpen(true)
-            }}
           />
         )}
       </main>
@@ -760,13 +787,24 @@ function Playground({ path, navigate }) {
         typingUsers={typingUsers}
         currentUser={user}
         onClose={() => setHubOpen(false)}
-        onPrompt={async (prompt) => {
-          if (!activeWorkspaceId) return
-          const message = await sendMessage(activeWorkspaceId, { content: prompt, type: 'message' })
-          sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
+        aiResult={aiResult}
+        aiLoading={loading.ai}
+        aiError={errors.ai}
+        pageContent={pageForm.content}
+        onAiAction={async (action) => {
+          await runAiAction({
+            action,
+            workspaceId: activeWorkspaceId,
+            pageContent: pageForm.content,
+            chatHistory: messages.map((message) => `${displayUser(message.sender)}: ${message.content}`).join('\n'),
+          })
         }}
         onSend={async (payload) => {
-          const message = await sendMessage(activeWorkspaceId, payload)
+          const message = await sendMessage(activeWorkspaceId, {
+            ...payload,
+            pageContent: payload.content?.trim().startsWith('@AI') ? pageForm.content : undefined,
+            chatHistory: payload.content?.trim().startsWith('@AI') ? messages.map((item) => `${displayUser(item.sender)}: ${item.content}`).join('\n') : undefined,
+          })
           sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
         }}
         onDelete={(messageId) => deleteMessage(activeWorkspaceId, messageId)}
@@ -781,7 +819,7 @@ function Playground({ path, navigate }) {
         members={members}
         busy={loading}
         errors={errors}
-        onCreateWorkspace={createWorkspace}
+        onCreateWorkspace={handleWorkspaceCreated}
         onUpdateWorkspace={updateWorkspace}
         onDeleteWorkspace={deleteWorkspace}
         onInviteMember={inviteMember}
@@ -795,7 +833,7 @@ function getPlaygroundMode(path) {
   if (path === '/workspaces/new') return 'workspace-new'
   if (path === '/pages/new') return 'page-new'
   if (path === '/dashboard' || path === '/playground') return 'dashboard'
-  return 'action'
+  return 'dashboard'
 }
 
 function WorkspaceSidebar({
@@ -803,10 +841,8 @@ function WorkspaceSidebar({
   navigate,
   activeDoc,
   ownedWorkspaces = [],
+  workspacePages = [],
   sharedWorkspaces = [],
-  recentPages = [],
-  archivedPages = [],
-  favorites = [],
   user,
   onLogout,
   onSearch,
@@ -847,16 +883,16 @@ function WorkspaceSidebar({
           </div>
           {searchResults && query && (
             <div className="mx-3 mt-2 rounded-lg border border-outline-variant/40 bg-white p-2 text-xs text-on-surface-variant">
-              {Object.entries(searchResults).flatMap(([type, values]) => (Array.isArray(values) ? values.map((item) => ({ type, item })) : [])).slice(0, 4).map(({ type, item }) => (
-                <button className="block w-full rounded px-2 py-1 text-left hover:bg-surface-container-low" key={`${type}-${getId(item) || item.title || item.name}`} type="button" onClick={() => navigate(type.includes('page') ? `/pages/${getId(item)}` : `/workspaces/${getId(item)}`)}>
-                  <span className="font-bold capitalize">{type}</span> · {item.title || item.name || item.content}
+              {Object.entries(searchResults).flatMap(([type, values]) => (Array.isArray(values) ? values.map((item) => ({ type, item })) : [])).slice(0, 6).map(({ type, item }) => (
+                <button className="block w-full rounded px-2 py-1 text-left hover:bg-surface-container-low" key={`${type}-${getId(item) || item.title || item.name || item.email}`} type="button" onClick={() => {
+                  if (type === 'pages') navigate(`/pages/${getId(item)}`)
+                  if (type === 'workspaces') navigate(`/workspaces/${getId(item)}`)
+                }}>
+                  <span className="font-bold capitalize">{type}</span> · {item.title || item.name || item.username || item.email || item.content}
                 </button>
               ))}
             </div>
           )}
-          <SidebarItem active={path === '/dashboard' || path === '/playground'} icon="home" label="Home" onClick={() => navigate('/dashboard')} />
-          <SidebarItem active={false} icon="schedule" label={`Recent (${recentPages.length})`} />
-          <SidebarItem active={false} icon="star" label={`Favorites (${favorites.length})`} />
         </div>
 
         <div className="space-y-1">
@@ -867,82 +903,68 @@ function WorkspaceSidebar({
             </button>
           </h3>
           <div className="space-y-0.5">
-            {ownedWorkspaces.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-outline">No owned workspaces yet.</p>
+            {[...ownedWorkspaces, ...sharedWorkspaces].length === 0 ? (
+              <p className="px-3 py-2 text-xs text-outline">No workspaces yet.</p>
             ) : (
-              ownedWorkspaces.map((workspace) => (
-                <button
-                  className="w-full flex items-center justify-between px-3 py-2 text-on-surface hover:bg-surface-container-high rounded-lg transition-colors group"
-                  key={getId(workspace) || workspace.name}
-                  type="button"
-                  onClick={() => onSelectWorkspace?.(workspace)}
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="material-symbols-outlined text-[18px] text-outline">keyboard_arrow_down</span>
-                    <span className="material-symbols-outlined text-[18px] text-primary">folder_open</span>
-                    <span className="text-sm font-semibold truncate">{workspace.name}</span>
-                  </span>
-                  <span className="hidden group-hover:flex items-center gap-1 text-outline">
-                    <span className="material-symbols-outlined text-[16px] hover:text-primary" onClick={(event) => { event.stopPropagation(); navigate('/pages/new') }}>add</span>
-                    <span className="material-symbols-outlined text-[16px] hover:text-primary" onClick={(event) => { event.stopPropagation(); onOpenModal?.('workspace-settings') }}>settings</span>
-                  </span>
-                </button>
-              ))
+              [...ownedWorkspaces, ...sharedWorkspaces].map((workspace) => {
+                const workspaceId = getId(workspace)
+                const selected = activeDoc.workspaceId === workspaceId
+                return (
+                  <div key={workspaceId || workspace.name}>
+                    <button
+                      className={`w-full flex items-center justify-between px-3 py-2 text-on-surface hover:bg-surface-container-high rounded-lg transition-colors group ${selected ? 'bg-white' : ''}`}
+                      type="button"
+                      onClick={() => onSelectWorkspace?.(workspace)}
+                    >
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="material-symbols-outlined text-[18px] text-outline">{selected ? 'keyboard_arrow_down' : 'keyboard_arrow_right'}</span>
+                        <span className="material-symbols-outlined text-[18px] text-primary">folder_open</span>
+                        <span className="text-sm font-semibold truncate">{workspace.name}</span>
+                      </span>
+                      <span className="hidden group-hover:flex items-center gap-1 text-outline">
+                        <span className="material-symbols-outlined text-[16px] hover:text-primary" onClick={(event) => { event.stopPropagation(); onSelectWorkspace?.(workspace); navigate('/pages/new') }}>add</span>
+                        <span className="material-symbols-outlined text-[16px] hover:text-primary" onClick={(event) => { event.stopPropagation(); onSelectWorkspace?.(workspace); onOpenModal?.('workspace-settings') }}>settings</span>
+                      </span>
+                    </button>
+                    {selected && (
+                      <div className="ml-8 space-y-0.5 mt-0.5">
+                        <button className="w-full flex items-center gap-2 px-3 py-1.5 text-primary hover:bg-surface-container-high rounded-lg text-sm font-bold transition-colors" type="button" onClick={() => navigate('/pages/new')}>
+                          <span className="material-symbols-outlined text-[18px]">add</span>
+                          <span>Create page</span>
+                        </button>
+                        {workspacePages.length === 0 ? (
+                          <p className="px-3 py-1.5 text-xs text-outline">No pages in this workspace.</p>
+                        ) : (
+                          workspacePages.map((page) => (
+                            <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" key={getId(page) || page.title} type="button" onClick={() => navigate(`/pages/${getId(page)}`)}>
+                              <span className="material-symbols-outlined text-[18px]">description</span>
+                              <span className="truncate">{page.title || 'Untitled page'}</span>
+                            </button>
+                          ))
+                        )}
+                        <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button" onClick={() => onOpenModal?.('members')}>
+                          <span className="material-symbols-outlined text-[18px]">group</span>
+                          <span>Members</span>
+                        </button>
+                        <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button">
+                          <span className="material-symbols-outlined text-[18px]">forum</span>
+                          <span>Discussion</span>
+                        </button>
+                        <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button">
+                          <span className="material-symbols-outlined text-[18px]">gavel</span>
+                          <span>Decisions</span>
+                        </button>
+                        <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button" onClick={() => onOpenModal?.('workspace-settings')}>
+                          <span className="material-symbols-outlined text-[18px]">settings</span>
+                          <span>Settings</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )
+              })
             )}
-            <div className="ml-8 space-y-0.5 mt-0.5">
-              <button className="w-full flex items-center gap-3 px-3 py-1.5 bg-primary/5 text-primary rounded-lg text-sm font-bold" type="button" onClick={() => navigate('/dashboard')}>
-                <span className="material-symbols-outlined text-[18px]">description</span>
-                <span className="truncate">{activeDoc.pageTitle}</span>
-              </button>
-              <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button" onClick={() => onOpenModal?.('members')}>
-                <span className="material-symbols-outlined text-[18px]">group</span>
-                <span>Members</span>
-              </button>
-              <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button">
-                <span className="material-symbols-outlined text-[18px]">forum</span>
-                <span>Discussion</span>
-              </button>
-              <button className="w-full flex items-center gap-2 px-3 py-1.5 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" type="button">
-                <span className="material-symbols-outlined text-[18px]">gavel</span>
-                <span>Decisions</span>
-              </button>
-            </div>
           </div>
-        </div>
-
-        <div className="mt-6 space-y-1">
-          <h3 className="px-3 text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Shared Workspaces</h3>
-          {sharedWorkspaces.length === 0 ? (
-            <p className="px-3 py-2 text-xs text-outline">No shared workspaces.</p>
-          ) : (
-            sharedWorkspaces.map((workspace) => (
-              <button className="w-full flex items-center gap-2 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" key={getId(workspace) || workspace.name} type="button" onClick={() => onSelectWorkspace?.(workspace)}>
-                <span className="material-symbols-outlined text-[18px]">keyboard_arrow_right</span>
-                <span className="material-symbols-outlined text-[18px]">group</span>
-                <span className="truncate">{workspace.name}</span>
-              </button>
-            ))
-          )}
-        </div>
-
-        <div className="mt-6 space-y-1">
-          <h3 className="px-3 text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Archived Pages</h3>
-          {archivedPages.length === 0 ? <p className="px-3 py-2 text-xs text-outline">Nothing archived.</p> : archivedPages.map((page) => (
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-on-surface-variant hover:bg-surface-container-high rounded-lg text-sm transition-colors" key={getId(page) || page.title} type="button" onClick={() => navigate(`/pages/${getId(page)}`)}>
-              <span className="material-symbols-outlined text-[18px]">archive</span>
-              <span className="truncate">{page.title}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-6 space-y-1">
-          <h3 className="px-3 text-[10px] font-bold text-outline uppercase tracking-widest mb-2">Future</h3>
-          {['Meetings', 'Tasks', 'Presentations', 'Knowledge Base'].map((item) => (
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-outline rounded-lg text-sm" key={item} type="button">
-              <span className="material-symbols-outlined text-[18px]">radio_button_unchecked</span>
-              <span>{item}</span>
-            </button>
-          ))}
         </div>
       </nav>
 
@@ -999,13 +1021,12 @@ function WorkspaceTopbar({ activeDoc, user, onlineUsers = [], autosave, messageC
         </button>
         <div className="min-w-0">
           <nav className="flex items-center text-[11px] text-outline font-bold uppercase tracking-wider">
-            <span className="truncate">{activeDoc.workspaceName || 'Engineering'}</span>
+            <span className="truncate">{activeDoc.workspaceName || 'No workspace selected'}</span>
             <span className="mx-2 opacity-50">/</span>
-            <span className="text-on-surface truncate">{activeDoc.pageTitle || 'Roadmap Q4'}</span>
+            <span className="text-on-surface truncate">{activeDoc.pageTitle || 'No page selected'}</span>
           </nav>
           <div className="flex items-center gap-2 mt-0.5 min-w-0">
-            <h1 className="text-lg font-bold text-on-surface truncate">{activeDoc.pageTitle || 'Product Roadmap Q4'}</h1>
-            <span className="hidden sm:inline text-[10px] px-1.5 py-0.5 bg-surface-container-high text-outline rounded font-label-mono">v2.4.0</span>
+            <h1 className="text-lg font-bold text-on-surface truncate">{activeDoc.pageTitle || 'No page selected'}</h1>
           </div>
         </div>
       </div>
@@ -1026,14 +1047,6 @@ function WorkspaceTopbar({ activeDoc, user, onlineUsers = [], autosave, messageC
           </div>
           <span>{autosave?.saving ? 'Saving...' : autosave?.savedAt ? `Saved ${autosave.savedAt.toLocaleTimeString()}` : activeDoc.updatedAt ? `Updated ${formatDate(activeDoc.updatedAt)}` : 'Saved'}</span>
         </div>
-        <div className="hidden sm:flex items-center gap-1 bg-surface-container-low p-1 rounded-lg">
-          <button className="p-1.5 rounded hover:bg-white text-outline hover:text-primary transition-all" title="Tasks" type="button"><span className="material-symbols-outlined text-[18px]">task_alt</span></button>
-          <button className="p-1.5 rounded hover:bg-white text-outline hover:text-primary transition-all" title="Meetings" type="button"><span className="material-symbols-outlined text-[18px]">video_call</span></button>
-          <button className="p-1.5 rounded hover:bg-white text-outline hover:text-primary transition-all" title="Present" type="button"><span className="material-symbols-outlined text-[18px]">present_to_all</span></button>
-        </div>
-        <button className="px-4 py-1.5 bg-primary text-white font-bold rounded-lg hover:shadow-lg hover:shadow-primary/20 transition-all text-sm" type="button">
-          Share
-        </button>
         <button className="p-2 hover:bg-surface-container rounded-lg text-on-surface-variant transition-colors relative" title="Discussion Hub" type="button" onClick={onToggleHub}>
           <span className="material-symbols-outlined">forum</span>
           {messageCount > 0 && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-error border-2 border-white rounded-full"></span>}
@@ -1054,22 +1067,18 @@ function DashboardHome({
   pageForm,
   onPageChange,
   loading,
-  workspaceList,
-  sharedWorkspaces,
-  recentPages,
-  recentDiscussions,
   selectedWorkspaceId,
-  selectedWorkspace,
   navigate,
   onRefresh,
-  onSelectWorkspace,
   onOpenModal,
   onDeletePage,
   onArchivePage,
-  onUnarchivePage,
+  onToggleFavorite,
+  isFavorite,
   autosave,
-  onAskAi,
 }) {
+  const hasPage = Boolean(activeDoc.pageId)
+
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar scroll-smooth bg-white">
       <div className="max-w-[800px] mx-auto pt-8 sm:pt-12 pb-24 px-4 sm:px-8">
@@ -1085,34 +1094,27 @@ function DashboardHome({
           </button>
         </div>
 
-        <div className="mb-10 p-4 bg-amber-50 border-l-4 border-amber-400 rounded-r-xl flex items-start gap-3">
-          <span className="material-symbols-outlined text-amber-600 mt-0.5">priority_high</span>
-          <div>
-            <h4 className="text-sm font-bold text-amber-900 uppercase tracking-tight">Recent Decisions</h4>
-            <p className="text-sm text-amber-800">Open the discussion drawer to review pinned messages and decisions from the backend.</p>
-          </div>
-        </div>
-
         <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="flex-1 min-w-0">
             <input
               className="w-full bg-transparent font-display-lg text-4xl sm:text-display-lg text-on-surface mb-6 leading-tight outline-none"
-              value={pageForm.title || activeDoc.pageTitle || ''}
+              value={pageForm.title}
               onChange={(event) => onPageChange((current) => ({ ...current, title: event.target.value }))}
               placeholder="Untitled page"
+              disabled={!hasPage}
             />
             <div className="relative group mb-2 pl-1">
-              <div className="absolute -left-4 top-0 h-full w-1 bg-pink-500/20 rounded-full"></div>
               <textarea
-                className="w-full min-h-28 resize-none bg-transparent text-body-lg text-on-surface-variant leading-relaxed font-medium outline-none"
-                value={pageForm.content || activeDoc.pageContent || ''}
+                className="w-full min-h-72 resize-none bg-transparent text-body-lg text-on-surface-variant leading-relaxed font-medium outline-none disabled:text-outline"
+                value={pageForm.content}
                 onChange={(event) => onPageChange((current) => ({ ...current, content: event.target.value }))}
-                placeholder="Start writing..."
+                placeholder={hasPage ? 'Start writing...' : 'Select or create a page to start writing.'}
+                disabled={!hasPage}
               />
             </div>
             <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-outline">
-              <span>Created by {displayUser(activeDoc.createdBy)}</span>
-              <span>Modified by {displayUser(activeDoc.modifiedBy)}</span>
+              <span>Created by {activeDoc.createdBy ? displayUser(activeDoc.createdBy) : 'Not available'}</span>
+              <span>Modified by {activeDoc.modifiedBy ? displayUser(activeDoc.modifiedBy) : 'Not available'}</span>
               <span>{activeDoc.updatedAt ? `Updated ${formatDate(activeDoc.updatedAt)}` : 'Not saved yet'}</span>
             </div>
           </div>
@@ -1120,128 +1122,15 @@ function DashboardHome({
             <button className="px-4 py-2.5 rounded-lg bg-primary text-white text-sm font-bold" type="button" onClick={() => onOpenModal('create-workspace')}>
               New Workspace
             </button>
-            <button className="px-4 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={() => navigate('/pages/new')}>
-              New Page
+            <button className="px-4 py-2.5 rounded-lg border border-outline-variant text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50" type="button" disabled={!selectedWorkspaceId} onClick={() => navigate('/pages/new')}>
+              Create Page
             </button>
-            <button className="px-3 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={onArchivePage}>Archive</button>
-            <button className="px-3 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={onUnarchivePage}>Restore</button>
-            <button className="px-3 py-2.5 rounded-lg border border-[#f1b5b5] text-[#b42318] text-sm font-bold" type="button" onClick={onDeletePage}>Delete</button>
-          </div>
-        </div>
-
-        <section className="space-y-6 mb-12">
-          <h3 className="font-bold text-on-surface flex items-center gap-2 text-xl">
-            <span className="material-symbols-outlined text-primary">checklist</span>
-            Key Milestones
-          </h3>
-          <div className="space-y-3">
-            <div className="flex items-center gap-4 group p-3 hover:bg-surface-container-low rounded-xl transition-colors">
-              <span className="w-6 h-6 rounded-md border-2 border-outline-variant flex items-center justify-center bg-white group-hover:border-primary">
-                <span className="material-symbols-outlined text-[16px] text-primary opacity-0 group-hover:opacity-100">check</span>
-              </span>
-              <span className="text-on-surface font-medium">Alpha Release: Core Editor Modules</span>
-            </div>
-            <div className="flex items-center gap-4 p-3 bg-surface-container-low/50 rounded-xl">
-              <span className="w-6 h-6 rounded-md border-2 border-primary flex items-center justify-center bg-primary">
-                <span className="material-symbols-outlined text-[16px] text-white">check</span>
-              </span>
-              <span className="text-outline line-through font-medium italic">Draft API Documentation Specs</span>
-              <span className="ml-auto text-[10px] text-outline font-bold uppercase tracking-widest">Completed</span>
-            </div>
-          </div>
-        </section>
-
-        <div className="my-12 p-5 sm:p-8 bg-surface-container-low rounded-2xl border border-outline-variant/30 relative overflow-hidden group">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-              <span className="material-symbols-outlined">sports_esports</span>
-            </div>
-            <h3 className="font-bold text-on-surface text-xl">Team Chess Break</h3>
-          </div>
-          <div className="grid gap-6 sm:grid-cols-2">
-            <div className="aspect-square bg-surface border-2 border-outline-variant rounded-lg flex items-center justify-center relative overflow-hidden">
-              <div className="grid grid-cols-8 grid-rows-8 w-full h-full opacity-50">
-                {Array.from({ length: 64 }).map((_, index) => (
-                  <span className={(Math.floor(index / 8) + index) % 2 === 0 ? 'bg-surface-container' : ''} key={index}></span>
-                ))}
-              </div>
-              <div className="absolute inset-0 flex items-center justify-center px-3 text-center">
-                <span className="text-outline text-xs font-bold uppercase tracking-widest">Active Game: {displayUser(activeDoc.modifiedBy)} vs AI</span>
-              </div>
-            </div>
-            <div className="flex flex-col justify-center gap-3">
-              <button className="w-full px-4 py-2 bg-white border border-outline-variant rounded-lg text-sm font-bold hover:bg-surface-container-low transition-colors flex items-center justify-center gap-2" type="button">
-                <span className="material-symbols-outlined text-[18px]">undo</span>
-                Undo Move
-              </button>
-              <button className="w-full px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2" type="button" onClick={() => onAskAi?.('@AI what is the best move here?')}>
-                <span className="material-symbols-outlined text-[18px]">lightbulb</span>
-                Ask AI for Move
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="my-10 p-5 sm:p-8 bg-surface-container-low rounded-2xl border border-outline-variant/30 relative overflow-hidden group hover:shadow-xl hover:shadow-primary/5 transition-all">
-          <div className="flex items-start gap-5">
-            <div className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/20 flex-shrink-0">
-              <span className="material-symbols-outlined">folder_open</span>
-            </div>
-            <div>
-              <h4 className="font-bold text-on-surface text-lg mb-1.5">{selectedWorkspace?.name || 'No workspace selected'}</h4>
-              <p className="text-on-surface-variant leading-relaxed">{selectedWorkspace?.description || 'Create or select a workspace to load pages, members, discussions, pinned messages, and decisions.'}</p>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button className="text-xs font-bold bg-white px-3 py-2 rounded-lg border border-outline-variant" type="button" onClick={() => onOpenModal('workspace-settings')}>Workspace Settings</button>
-                <button className="text-xs font-bold bg-white px-3 py-2 rounded-lg border border-outline-variant" type="button" onClick={() => onOpenModal('members')}>Members</button>
-                <button className="text-xs font-bold bg-white px-3 py-2 rounded-lg border border-outline-variant" type="button" onClick={() => onOpenModal('delete-workspace')}>Delete Workspace</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 mb-12">
-          <ListPanel title="Owned Workspaces" items={workspaceList} empty="No owned workspaces yet." render={(item) => (
-            <button className={`w-full text-left p-4 flex items-center justify-between gap-4 hover:bg-surface-container-low ${getId(item) === selectedWorkspaceId ? 'bg-primary/5 text-primary' : ''}`} type="button" onClick={() => onSelectWorkspace(item)}>
-              <span className="min-w-0">
-                <span className="block font-semibold truncate">{item.name || 'Untitled workspace'}</span>
-                <span className="block text-sm text-on-surface-variant truncate">Owner: {displayUser(item.owner)} · Members: {item.members?.length || 0}</span>
-                <span className="block text-xs text-outline">Updated {formatDate(item.updatedAt)}</span>
-              </span>
-              <span className="material-symbols-outlined text-outline">chevron_right</span>
+            <button className="px-3 py-2.5 rounded-lg border border-outline-variant text-sm font-bold disabled:opacity-50" title={isFavorite ? 'Remove favorite' : 'Add favorite'} type="button" disabled={!hasPage} onClick={onToggleFavorite}>
+              <span className="material-symbols-outlined text-[18px] align-middle">{isFavorite ? 'star' : 'star_border'}</span>
             </button>
-          )} />
-          <ListPanel title="Shared Workspaces" items={sharedWorkspaces} empty="No shared workspaces." render={(item) => (
-            <button className="w-full text-left p-4 hover:bg-surface-container-low" type="button" onClick={() => onSelectWorkspace(item)}>
-              <span className="block font-semibold truncate">{item.name || 'Untitled workspace'}</span>
-              <span className="block text-sm text-on-surface-variant truncate">Members: {item.members?.length || 0}</span>
-            </button>
-          )} />
-          <ListPanel title="Recent Pages" items={recentPages} empty="No recent pages from backend." render={(item) => (
-            <button className="w-full text-left p-4 hover:bg-surface-container-low" type="button" onClick={() => navigate(`/pages/${getId(item)}`)}>
-              <span className="block font-semibold truncate">{item.title || 'Untitled page'}</span>
-              <span className="block text-xs text-outline">Updated {formatDate(item.updatedAt)}</span>
-            </button>
-          )} />
-          <ListPanel title="Recent Discussions" items={recentDiscussions} empty="No recent discussions from backend." render={(item) => (
-            <div className="p-4">
-              <span className="block font-semibold truncate">{displayUser(item.sender)}</span>
-              <span className="block text-sm text-on-surface-variant truncate">{item.content}</span>
-            </div>
-          )} />
-        </div>
-
-        <div className="mb-20 rounded-2xl border border-outline-variant bg-[#0d1117] overflow-hidden shadow-2xl">
-          <div className="bg-white/5 px-5 py-3 flex items-center justify-between border-b border-white/10">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="flex gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-full bg-red-500/50"></span>
-                <span className="w-2.5 h-2.5 rounded-full bg-amber-500/50"></span>
-                <span className="w-2.5 h-2.5 rounded-full bg-green-500/50"></span>
-              </div>
-              <span className="text-[11px] font-label-mono text-white/50 uppercase tracking-widest truncate">Live workspace state</span>
-            </div>
+            <button className="px-3 py-2.5 rounded-lg border border-outline-variant text-sm font-bold disabled:opacity-50" type="button" disabled={!hasPage} onClick={onArchivePage}>Archive</button>
+            <button className="px-3 py-2.5 rounded-lg border border-[#f1b5b5] text-[#b42318] text-sm font-bold disabled:opacity-50" type="button" disabled={!hasPage} onClick={onDeletePage}>Delete</button>
           </div>
-          <pre className="p-5 sm:p-8 font-label-mono text-sm leading-relaxed text-blue-300 overflow-x-auto"><code>{JSON.stringify({ workspaceId: selectedWorkspaceId || null, pageId: activeDoc.pageTitle || null }, null, 2)}</code></pre>
         </div>
       </div>
     </div>
@@ -1249,11 +1138,10 @@ function DashboardHome({
 }
 function WorkspaceCreatePanel({ workspace, onChange, onSubmit, busy, status }) {
   return (
-    <FormShell title="Create workspace" subtitle="Only the fields your schema needs." method="POST">
+    <FormShell title="Create workspace" subtitle="Create a real backend workspace." method="POST">
       <form className="space-y-5" onSubmit={onSubmit}>
         <AppleInput label="Name" value={workspace.name} onChange={(name) => onChange({ ...workspace, name })} />
         <AppleTextarea label="Description" value={workspace.description} onChange={(description) => onChange({ ...workspace, description })} />
-        <ReadonlyCode value={JSON.stringify(workspace, null, 2)} />
         <SubmitRow busy={busy} status={status} label="Create Workspace" />
       </form>
     </FormShell>
@@ -1265,50 +1153,77 @@ function PageCreatePanel({ pageForm, workspaceList, workspaceId, onChange, onWor
     ...pageForm,
     workspace: pageForm.workspace === '{{workspaceId}}' ? workspaceId : pageForm.workspace,
   }
+  const selectedWorkspace = workspaceList.find((item) => getId(item) === payload.workspace)
+  const canCreate = Boolean(payload.workspace && pageForm.title.trim())
 
   return (
-    <FormShell title="Create page" subtitle="Write the first page inside a workspace." method="POST">
-      <form className="space-y-5" onSubmit={onSubmit}>
-        <AppleInput label="Title" value={pageForm.title} onChange={(title) => onChange({ ...pageForm, title })} />
-        <AppleTextarea label="Content" value={pageForm.content} onChange={(content) => onChange({ ...pageForm, content })} />
-        {workspaceList.length > 0 ? (
-          <label className="block">
-            <span className="block text-xs font-semibold text-on-surface-variant mb-2">Workspace</span>
-            <select
-              className="w-full rounded-xl border border-[#e1e1e6] bg-white px-4 py-3 outline-none focus:border-[#1c1c1e]"
-              value={payload.workspace || ''}
-              onChange={(event) => {
-                onChange({ ...pageForm, workspace: event.target.value })
-                onWorkspaceSelect(event.target.value)
-              }}
-            >
-              <option value="">Select workspace</option>
-              {workspaceList.map((item) => (
-                <option key={getId(item)} value={getId(item)}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : (
-          <AppleInput label="Workspace" value={pageForm.workspace} onChange={(workspace) => onChange({ ...pageForm, workspace })} />
-        )}
-        <ReadonlyCode value={JSON.stringify(payload, null, 2)} />
-        <SubmitRow busy={busy} status={status} label="Create Page" />
+    <div className="flex-1 overflow-y-auto bg-white">
+      <form className="min-h-full" onSubmit={onSubmit}>
+        <div className="border-b border-outline-variant/30 bg-white/95 px-4 py-3 sm:px-8 sticky top-0 z-20">
+          <div className="max-w-4xl mx-auto flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="material-symbols-outlined text-primary">description</span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-on-surface">{selectedWorkspace?.name || 'Select a workspace'}</p>
+              </div>
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              {workspaceList.length > 0 ? (
+                <select
+                  className="min-w-0 rounded-lg border border-outline-variant bg-white px-3 py-2 text-sm outline-none focus:border-primary"
+                  value={payload.workspace || ''}
+                  onChange={(event) => {
+                    onChange({ ...pageForm, workspace: event.target.value })
+                    onWorkspaceSelect(event.target.value)
+                  }}
+                >
+                  <option value="">Select workspace</option>
+                  {workspaceList.map((item) => (
+                    <option key={getId(item)} value={getId(item)}>
+                      {item.name}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  className="min-w-0 rounded-lg border border-outline-variant bg-white px-3 py-2 text-sm outline-none focus:border-primary"
+                  placeholder="Workspace ID"
+                  value={pageForm.workspace === '{{workspaceId}}' ? workspaceId : pageForm.workspace}
+                  onChange={(event) => onChange({ ...pageForm, workspace: event.target.value })}
+                />
+              )}
+              <button className="rounded-lg bg-primary px-4 py-2 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-50" type="submit" disabled={busy || !canCreate}>
+                {busy ? 'Creating...' : 'Create Page'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <section className="max-w-4xl mx-auto px-4 sm:px-8 py-10 sm:py-14">
+          {status && (
+            <div className="mb-6 rounded-lg border border-outline-variant/40 bg-surface-container-low px-4 py-3 text-sm text-on-surface-variant">
+              {status}
+            </div>
+          )}
+          <input
+            className="w-full bg-transparent font-display-lg text-4xl sm:text-6xl font-bold leading-tight text-on-surface outline-none placeholder:text-outline/70"
+            value={pageForm.title}
+            onChange={(event) => onChange({ ...pageForm, title: event.target.value })}
+            placeholder="Untitled"
+            autoFocus
+          />
+          <div className="mt-6 flex flex-wrap gap-2 text-xs text-outline">
+            <span className="rounded-md bg-surface-container-low px-2.5 py-1">Workspace: {selectedWorkspace?.name || payload.workspace || 'not selected'}</span>
+          </div>
+          <textarea
+            className="mt-10 min-h-[52vh] w-full resize-none bg-transparent text-lg leading-8 text-on-surface-variant outline-none placeholder:text-outline"
+            value={pageForm.content}
+            onChange={(event) => onChange({ ...pageForm, content: event.target.value })}
+            placeholder="Start writing..."
+          />
+        </section>
       </form>
-    </FormShell>
-  )
-}
-
-function RouteActionPanel({ path, workspaceId, pageId, busy, status, onRun }) {
-  const route = [...workspaceRoutes, ...pageRoutes].find((item) => item.href === path)
-  return (
-    <FormShell title={route?.label || 'Route action'} subtitle="Attached route for the selected workspace or page." method={route?.method || 'GET'}>
-      <div className="space-y-5">
-        <ReadonlyCode value={JSON.stringify({ route: path, workspaceId, pageId }, null, 2)} />
-        <SubmitRow busy={busy} status={status} label="Run Route" onClick={onRun} />
-      </div>
-    </FormShell>
+    </div>
   )
 }
 
@@ -1368,14 +1283,6 @@ function AppleTextarea({ label, value, onChange }) {
   )
 }
 
-function ReadonlyCode({ value }) {
-  return (
-    <pre className="rounded-xl bg-[#f7f7f8] p-4 font-label-mono text-sm leading-6 text-on-surface overflow-x-auto">
-      <code>{value}</code>
-    </pre>
-  )
-}
-
 function SubmitRow({ busy, status, label, onClick }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center gap-4">
@@ -1401,7 +1308,10 @@ function DiscussionHub({
   typingUsers = [],
   currentUser,
   onClose,
-  onPrompt,
+  onAiAction,
+  aiResult,
+  aiLoading,
+  aiError,
   onSend,
   onDelete,
   onPin,
@@ -1412,24 +1322,23 @@ function DiscussionHub({
   const [replyTo, setReplyTo] = useState(null)
   const [tab, setTab] = useState('messages')
   const quickActions = [
-    ['summarize', 'Summarize', '@AI summarize this document'],
-    ['checklist', 'Tasks', '@AI generate tasks from document'],
-    ['decision_making', 'Decisions', '@AI extract decisions'],
-    ['auto_fix_high', 'PRD', '@AI generate a PRD'],
+    ['summarize', 'Summarize', 'summarize'],
+    ['checklist', 'Tasks', 'tasks'],
+    ['decision_making', 'Decisions', 'decisions'],
+    ['article', 'PRD', 'prd'],
   ]
 
   const submit = async () => {
     if (!workspaceId || !content.trim()) return
-    await onSend({ content: content.trim(), mentions: extractMentions(content), replyTo: replyTo?._id || null, type: content.startsWith('@AI') ? 'ai' : 'message' })
+    await onSend({ content: content.trim(), mentions: extractMentions(content), replyTo: replyTo?._id || null, type: content.trim().startsWith('@AI') ? 'ai' : 'message' })
     setContent('')
     setReplyTo(null)
     onStopTyping?.()
   }
 
-  const triggerPrompt = async (prompt) => {
+  const triggerPrompt = async (action) => {
     if (!workspaceId) return
-    setContent(prompt)
-    await onPrompt(prompt)
+    await onAiAction(action)
   }
 
   if (!open) return null
@@ -1463,13 +1372,21 @@ function DiscussionHub({
         <div className="bg-surface-container-low/50 p-4 rounded-xl border border-outline-variant/30">
           <h4 className="text-[10px] font-bold text-outline uppercase tracking-widest mb-3">AI Quick Actions</h4>
           <div className="grid grid-cols-2 gap-2">
-            {quickActions.map(([icon, label, prompt]) => (
-              <button className="flex items-center gap-2 p-2 bg-white border border-outline-variant hover:border-primary rounded-lg transition-all group" key={label} type="button" onClick={() => triggerPrompt(prompt)}>
+            {quickActions.map(([icon, label, action]) => (
+              <button className="flex items-center gap-2 p-2 bg-white border border-outline-variant hover:border-primary rounded-lg transition-all group disabled:opacity-50" key={label} type="button" disabled={aiLoading} onClick={() => triggerPrompt(action)}>
                 <span className="material-symbols-outlined text-[16px] text-outline group-hover:text-primary">{icon}</span>
                 <span className="text-[10px] font-bold">{label}</span>
               </button>
             ))}
           </div>
+          {aiLoading && <p className="mt-3 text-xs text-on-surface-variant">AI is processing the current page context...</p>}
+          {aiError && <p className="mt-3 text-xs text-[#b42318]">{aiError}</p>}
+          {aiResult?.content && (
+            <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 p-3">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-primary">{aiResult.action}</p>
+              <p className="whitespace-pre-wrap text-xs leading-relaxed text-on-surface-variant">{aiResult.content}</p>
+            </div>
+          )}
         </div>
 
         {tab === 'pinned' && <HubList title="Pinned Messages" items={pinnedMessages} empty="No pinned messages." />}
@@ -1479,16 +1396,16 @@ function DiscussionHub({
           <div className="space-y-4">
             {messages.length === 0 ? <p className="text-xs text-on-surface-variant">No messages yet.</p> : messages.map((message) => (
               <div className="flex gap-2.5" key={message._id || message.createdAt}>
-                <div className={`${message.type === 'ai' || message.content?.startsWith('@AI') ? 'bg-primary shadow-md' : 'bg-surface-container-high'} w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${message.type === 'ai' || message.content?.startsWith('@AI') ? 'text-white' : 'text-primary'} flex-shrink-0`}>
-                  {message.type === 'ai' || message.content?.startsWith('@AI') ? <span className="material-symbols-outlined text-[16px]">smart_toy</span> : initials(message.sender || currentUser)}
+                <div className={`${message.type === 'ai_message' ? 'bg-primary shadow-md' : 'bg-surface-container-high'} w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${message.type === 'ai_message' ? 'text-white' : 'text-primary'} flex-shrink-0`}>
+                  {message.type === 'ai_message' ? <span className="material-symbols-outlined text-[16px]">smart_toy</span> : initials(message.sender || currentUser)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1 gap-2">
-                    <span className={`text-xs font-bold truncate ${message.type === 'ai' || message.content?.startsWith('@AI') ? 'text-primary' : 'text-on-surface'}`}>{message.type === 'ai' || message.content?.startsWith('@AI') ? 'DevBot Assistant' : displayUser(message.sender || currentUser)}</span>
+                    <span className={`text-xs font-bold truncate ${message.type === 'ai_message' ? 'text-primary' : 'text-on-surface'}`}>{message.type === 'ai_message' ? 'AI Assistant' : displayUser(message.sender || currentUser)}</span>
                     <span className="text-[9px] text-outline flex-shrink-0">{formatDate(message.createdAt)}</span>
                   </div>
-                  <div className={`px-3 py-2 rounded-2xl rounded-tl-none border shadow-sm relative overflow-hidden ${message.type === 'ai' || message.content?.startsWith('@AI') ? 'bg-primary/5 border-primary/20' : 'bg-surface-container border-outline-variant/30'}`}>
-                    {(message.type === 'ai' || message.content?.startsWith('@AI')) && <div className="absolute top-0 left-0 w-1 h-full bg-primary/20"></div>}
+                  <div className={`px-3 py-2 rounded-2xl rounded-tl-none border shadow-sm relative overflow-hidden ${message.type === 'ai_message' ? 'bg-primary/5 border-primary/20' : 'bg-surface-container border-outline-variant/30'}`}>
+                    {message.type === 'ai_message' && <div className="absolute top-0 left-0 w-1 h-full bg-primary/20"></div>}
                     {message.replyTo && <p className="mb-1 text-[10px] text-outline">Replying to {displayUser(message.replyTo.sender)}</p>}
                     <p className="text-xs text-on-surface-variant leading-relaxed whitespace-pre-wrap">{message.content}</p>
                     <div className="mt-2 flex gap-2 text-[9px] font-bold text-outline">
@@ -1506,6 +1423,7 @@ function DiscussionHub({
                 <span className="text-[9px] font-bold">{typingUsers.map(displayUser).join(', ')} typing...</span>
               </div>
             )}
+            {aiLoading && <p className="ml-9 text-xs text-primary">AI is responding...</p>}
           </div>
         )}
       </div>
@@ -1513,12 +1431,11 @@ function DiscussionHub({
       <div className="p-4 border-t border-outline-variant bg-white">
         {replyTo && <div className="mb-2 text-[10px] text-outline flex justify-between"><span>Replying to {displayUser(replyTo.sender)}</span><button type="button" onClick={() => setReplyTo(null)}>Cancel</button></div>}
         <div className="relative">
-          <textarea className="w-full pl-4 pr-12 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none text-xs font-medium transition-all resize-none max-h-24 no-scrollbar" placeholder="Message team or @AI..." rows="1" value={content} onBlur={onStopTyping} onChange={(event) => { setContent(event.target.value); onTyping?.() }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} />
+          <textarea className="w-full pl-4 pr-12 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none text-xs font-medium transition-all resize-none max-h-24 no-scrollbar" placeholder="Message workspace..." rows="1" value={content} onBlur={onStopTyping} onChange={(event) => { setContent(event.target.value); onTyping?.() }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} />
           <button className="absolute right-2 bottom-2 p-1.5 bg-primary text-white rounded-lg shadow-lg hover:scale-105 transition-transform" type="button" onClick={submit}>
             <span className="material-symbols-outlined text-[18px]">send</span>
           </button>
         </div>
-        <p className="text-[9px] text-outline mt-2 text-center">Type <span className="font-bold text-primary">@AI</span> to trigger workspace intelligence.</p>
       </div>
     </aside>
   )

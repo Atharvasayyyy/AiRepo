@@ -11,7 +11,8 @@ exports.createMessage = async (messageData) => {
         replyTo,
         isPinned,
         pinnedBy,
-        pinnedAt
+        pinnedAt,
+        metadata
     } = messageData;
 
     if (!content || !workspace || !sender) {
@@ -57,6 +58,7 @@ exports.createMessage = async (messageData) => {
         replyTo: replyTo || null,
         isPinned: isPinned || false,
         pinnedBy: pinnedBy || null,
-        pinnedAt: pinnedAt || null
+        pinnedAt: pinnedAt || null,
+        metadata: metadata || {}
     });
 };

@@ -24,6 +24,7 @@ router.post(
     pageController.createPage
 );
 
+router.get("/workspace/:workspaceId", authMiddleware, pageController.getPagesByWorkspace);
 
 router.get("/:pageId", authMiddleware, pageController.getPageById);
 

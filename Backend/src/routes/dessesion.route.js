@@ -26,10 +26,12 @@ router.post(
     authMiddleware,
     [
         body('content').notEmpty().withMessage('Content is required'),
-        body('type').optional().isIn(['message', 'ai', 'decision', 'system']).withMessage('Type must be one of message, ai, decision, system'),
+        body('type').optional().isIn(['message', 'ai', 'ai_message', 'decision', 'system']).withMessage('Type must be one of message, ai, ai_message, decision, system'),
         body('mentions').optional().isArray().withMessage('Mentions must be an array of user IDs'),
         body('replyTo').optional().isMongoId().withMessage('ReplyTo must be a valid message ID'),
-        body('isPinned').optional().isBoolean().withMessage('isPinned must be a boolean')
+        body('isPinned').optional().isBoolean().withMessage('isPinned must be a boolean'),
+        body('pageContent').optional().isString().withMessage('Page content must be a string'),
+        body('chatHistory').optional().isString().withMessage('Chat history must be a string')
     ],
     dessesionController.sendMessage
 );

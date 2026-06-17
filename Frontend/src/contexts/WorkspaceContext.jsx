@@ -1,4 +1,7 @@
 import { useCallback, useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { activityService } from '../services/activityService'
+import { aiService } from '../services/aiService'
 import { discussionService } from '../services/discussionService'
 import { memberService } from '../services/memberService'
 import { pageService } from '../services/pageService'
@@ -6,399 +9,398 @@ import { searchService } from '../services/searchService'
 import { workspaceService } from '../services/workspaceService'
 import { WorkspaceContext } from './workspaceContextObject'
 
-function asArray(value) {
-  if (Array.isArray(value)) return value
-  if (Array.isArray(value?.workspaces)) return value.workspaces
-  if (Array.isArray(value?.ownedWorkspaces)) return value.ownedWorkspaces
-  return []
+function normalizeDashboard(data) {
+  const workspaces = data?.workspaces || []
+  const ownedWorkspaces = data?.ownedWorkspaces || workspaces
+  return {
+    ownedWorkspaces,
+    sharedWorkspaces: data?.sharedWorkspaces || [],
+    recentPages: data?.recentPages || [],
+    recentDiscussions: data?.recentDiscussions || [],
+    archivedPages: data?.archivedPages || [],
+    favorites: data?.favorites || [],
+  }
+}
+
+function mutationState(mutation) {
+  return {
+    loading: mutation.isPending,
+    error: mutation.error?.message || '',
+  }
 }
 
 export function WorkspaceProvider({ children }) {
-  const [dashboard, setDashboard] = useState({
-    ownedWorkspaces: [],
-    sharedWorkspaces: [],
-    recentPages: [],
-    recentDiscussions: [],
-    archivedPages: [],
-    favorites: [],
+  const queryClient = useQueryClient()
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('')
+  const [selectedPageId, setSelectedPageId] = useState('')
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const dashboardQuery = useQuery({
+    queryKey: ['workspace-dashboard'],
+    queryFn: workspaceService.dashboard,
   })
-  const [selectedWorkspace, setSelectedWorkspace] = useState(null)
-  const [selectedPage, setSelectedPage] = useState(null)
-  const [members, setMembers] = useState([])
-  const [messages, setMessages] = useState([])
-  const [pinnedMessages, setPinnedMessages] = useState([])
-  const [decisions, setDecisions] = useState([])
-  const [searchResults, setSearchResults] = useState(null)
-  const [onlineUsers, setOnlineUsers] = useState([])
-  const [typingUsers, setTypingUsers] = useState([])
-  const [loading, setLoading] = useState({})
-  const [errors, setErrors] = useState({})
 
-  const setBusy = useCallback((key, value) => {
-    setLoading((current) => ({ ...current, [key]: value }))
-  }, [])
+  const dashboard = normalizeDashboard(dashboardQuery.data)
+  const allWorkspaces = [...dashboard.ownedWorkspaces, ...dashboard.sharedWorkspaces]
+  const effectiveWorkspaceId = selectedWorkspaceId || allWorkspaces[0]?._id || ''
 
-  const setFailure = useCallback((key, error) => {
-    setErrors((current) => ({ ...current, [key]: error?.message || error || '' }))
-  }, [])
+  const workspaceQuery = useQuery({
+    queryKey: ['workspace', effectiveWorkspaceId],
+    queryFn: () => workspaceService.get(effectiveWorkspaceId),
+    enabled: Boolean(effectiveWorkspaceId),
+  })
 
-  const run = useCallback(
-    async (key, task) => {
-      setBusy(key, true)
-      setFailure(key, '')
-      try {
-        return await task()
-      } catch (error) {
-        setFailure(key, error)
-        throw error
-      } finally {
-        setBusy(key, false)
-      }
+  const selectedWorkspace = workspaceQuery.data?.workspace || workspaceQuery.data || allWorkspaces.find((item) => item._id === effectiveWorkspaceId) || null
+
+  const workspacePagesQuery = useQuery({
+    queryKey: ['workspace-pages', effectiveWorkspaceId],
+    queryFn: () => pageService.listByWorkspace(effectiveWorkspaceId),
+    enabled: Boolean(effectiveWorkspaceId),
+  })
+
+  const pageQuery = useQuery({
+    queryKey: ['page', selectedPageId],
+    queryFn: () => pageService.get(selectedPageId),
+    enabled: Boolean(selectedPageId),
+  })
+
+  const membersQuery = useQuery({
+    queryKey: ['members', effectiveWorkspaceId],
+    queryFn: () => memberService.list(effectiveWorkspaceId),
+    enabled: Boolean(effectiveWorkspaceId),
+  })
+
+  const messagesQuery = useQuery({
+    queryKey: ['messages', effectiveWorkspaceId],
+    queryFn: () => discussionService.getMessages(effectiveWorkspaceId),
+    enabled: Boolean(effectiveWorkspaceId),
+  })
+
+  const pinnedQuery = useQuery({
+    queryKey: ['pinned-messages', effectiveWorkspaceId],
+    queryFn: () => discussionService.pinned(effectiveWorkspaceId),
+    enabled: Boolean(effectiveWorkspaceId),
+  })
+
+  const decisionsQuery = useQuery({
+    queryKey: ['decisions', effectiveWorkspaceId],
+    queryFn: () => discussionService.decisions(effectiveWorkspaceId),
+    enabled: Boolean(effectiveWorkspaceId),
+  })
+
+  const searchQuery = useQuery({
+    queryKey: ['search', searchTerm],
+    queryFn: () => searchService.search(searchTerm),
+    enabled: Boolean(searchTerm),
+  })
+
+  const favoritesQuery = useQuery({
+    queryKey: ['favorites'],
+    queryFn: activityService.favorites,
+  })
+
+  const recentQuery = useQuery({
+    queryKey: ['recent-pages'],
+    queryFn: activityService.recent,
+  })
+
+  const invalidateWorkspace = useCallback(
+    async (workspaceId = effectiveWorkspaceId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['workspace-dashboard'] }),
+        queryClient.invalidateQueries({ queryKey: ['workspace', workspaceId] }),
+        queryClient.invalidateQueries({ queryKey: ['workspace-pages', workspaceId] }),
+        queryClient.invalidateQueries({ queryKey: ['members', workspaceId] }),
+        queryClient.invalidateQueries({ queryKey: ['messages', workspaceId] }),
+        queryClient.invalidateQueries({ queryKey: ['pinned-messages', workspaceId] }),
+        queryClient.invalidateQueries({ queryKey: ['decisions', workspaceId] }),
+      ])
     },
-    [setBusy, setFailure],
+    [effectiveWorkspaceId, queryClient],
   )
+
+  const createWorkspaceMutation = useMutation({
+    mutationFn: workspaceService.create,
+    onSuccess: async (data) => {
+      const workspace = data?.workspace || data
+      setSelectedWorkspaceId(workspace?._id || '')
+      await invalidateWorkspace(workspace?._id)
+    },
+  })
+
+  const updateWorkspaceMutation = useMutation({
+    mutationFn: ({ workspaceId, payload }) => workspaceService.update(workspaceId, payload),
+    onSuccess: async (_data, variables) => invalidateWorkspace(variables.workspaceId),
+  })
+
+  const deleteWorkspaceMutation = useMutation({
+    mutationFn: workspaceService.remove,
+    onSuccess: async () => {
+      setSelectedWorkspaceId('')
+      setSelectedPageId('')
+      await invalidateWorkspace('')
+    },
+  })
+
+  const createPageMutation = useMutation({
+    mutationFn: pageService.create,
+    onSuccess: async (data) => {
+      const page = data?.page || data
+      setSelectedPageId(page?._id || '')
+      await invalidateWorkspace(page?.workspace?._id || page?.workspace)
+    },
+  })
+
+  const favoritePageMutation = useMutation({
+    mutationFn: ({ pageId, favorite }) => (favorite ? pageService.unfavorite(pageId) : pageService.favorite(pageId)),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['favorites'] })
+    },
+  })
+
+  const updatePageMutation = useMutation({
+    mutationFn: ({ pageId, payload }) => pageService.update(pageId, payload),
+    onSuccess: async (data, variables) => {
+      const page = data?.page || data
+      await queryClient.invalidateQueries({ queryKey: ['page', variables.pageId] })
+      await invalidateWorkspace(page?.workspace?._id || page?.workspace || variables.payload.workspace)
+    },
+  })
+
+  const deletePageMutation = useMutation({
+    mutationFn: ({ pageId }) => pageService.remove(pageId),
+    onSuccess: async (_data, variables) => {
+      setSelectedPageId('')
+      await invalidateWorkspace(variables.workspaceId)
+    },
+  })
+
+  const archivePageMutation = useMutation({
+    mutationFn: ({ pageId }) => pageService.archive(pageId),
+    onSuccess: async (data, variables) => {
+      const page = data?.page || data
+      if (selectedPageId === variables.pageId) setSelectedPageId('')
+      await invalidateWorkspace(page?.workspace?._id || page?.workspace || variables.workspaceId)
+    },
+  })
+
+  const unarchivePageMutation = useMutation({
+    mutationFn: ({ pageId }) => pageService.unarchive(pageId),
+    onSuccess: async (data, variables) => {
+      const page = data?.page || data
+      await invalidateWorkspace(page?.workspace?._id || page?.workspace || variables.workspaceId)
+    },
+  })
+
+  const inviteMutation = useMutation({
+    mutationFn: ({ workspaceId, payload }) => memberService.invite(workspaceId, payload),
+    onSuccess: async (_data, variables) => invalidateWorkspace(variables.workspaceId),
+  })
+
+  const updateMemberMutation = useMutation({
+    mutationFn: ({ workspaceId, memberId, role }) => memberService.updateRole(workspaceId, memberId, { role }),
+    onSuccess: async (_data, variables) => invalidateWorkspace(variables.workspaceId),
+  })
+
+  const removeMemberMutation = useMutation({
+    mutationFn: ({ workspaceId, memberId }) => memberService.remove(workspaceId, memberId),
+    onSuccess: async (_data, variables) => invalidateWorkspace(variables.workspaceId),
+  })
+
+  const sendMessageMutation = useMutation({
+    mutationFn: ({ workspaceId, payload }) => discussionService.sendMessage(workspaceId, payload),
+    onSuccess: async (_data, variables) => invalidateWorkspace(variables.workspaceId),
+  })
+
+  const deleteMessageMutation = useMutation({
+    mutationFn: ({ workspaceId, messageId }) => discussionService.deleteMessage(workspaceId, messageId),
+    onSuccess: async (_data, variables) => invalidateWorkspace(variables.workspaceId),
+  })
+
+  const pinMessageMutation = useMutation({
+    mutationFn: ({ workspaceId, messageId, pinned }) => (pinned ? discussionService.unpin(workspaceId, messageId) : discussionService.pin(workspaceId, messageId)),
+    onSuccess: async (_data, variables) => invalidateWorkspace(variables.workspaceId),
+  })
+
+  const aiMutation = useMutation({
+    mutationFn: aiService.action,
+    onSuccess: async (_data, variables) => {
+      if (variables.workspaceId) await invalidateWorkspace(variables.workspaceId)
+    },
+  })
+
+  const selectWorkspace = useCallback((workspace) => {
+    setSelectedWorkspaceId(workspace?._id || workspace || '')
+    setSelectedPageId('')
+  }, [])
 
   const loadDashboard = useCallback(async () => {
-    return run('dashboard', async () => {
-      const data = await workspaceService.dashboard()
-      const workspaces = asArray(data)
-      const nextDashboard = {
-        ownedWorkspaces: data?.ownedWorkspaces || workspaces,
-        sharedWorkspaces: data?.sharedWorkspaces || [],
-        recentPages: data?.recentPages || [],
-        recentDiscussions: data?.recentDiscussions || [],
-        archivedPages: data?.archivedPages || [],
-        favorites: data?.favorites || [],
-      }
-      setDashboard(nextDashboard)
-      if (!selectedWorkspace && nextDashboard.ownedWorkspaces[0]) {
-        setSelectedWorkspace(nextDashboard.ownedWorkspaces[0])
-      }
-      return nextDashboard
-    })
-  }, [run, selectedWorkspace])
+    const data = await queryClient.fetchQuery({ queryKey: ['workspace-dashboard'], queryFn: workspaceService.dashboard })
+    return normalizeDashboard(data)
+  }, [queryClient])
 
-  const createWorkspace = useCallback(
-    async (payload) => {
-      return run('workspaceCreate', async () => {
-        const data = await workspaceService.create(payload)
-        const workspace = data?.workspace || data
-        await loadDashboard()
-        setSelectedWorkspace(workspace)
-        return workspace
-      })
+  const value = useMemo(() => ({
+    dashboard,
+    selectedWorkspace,
+    selectedWorkspaceId: effectiveWorkspaceId,
+    selectedPage: pageQuery.data?.page || pageQuery.data || null,
+    selectedPageId,
+    workspacePages: workspacePagesQuery.data?.pages || workspacePagesQuery.data || [],
+    favorites: favoritesQuery.data?.favorites || [],
+    recentPages: (recentQuery.data?.recent || []).map((item) => ({ ...(item.page || item), viewedAt: item.viewedAt })),
+    members: membersQuery.data?.members || [],
+    messages: messagesQuery.data?.messages || [],
+    pinnedMessages: pinnedQuery.data?.messages || [],
+    decisions: decisionsQuery.data?.decisions || [],
+    searchResults: searchQuery.data || null,
+    onlineUsers: [],
+    typingUsers: [],
+    loading: {
+      dashboard: dashboardQuery.isLoading,
+      workspace: workspaceQuery.isLoading,
+      workspacePages: workspacePagesQuery.isLoading,
+      page: pageQuery.isLoading,
+      members: membersQuery.isLoading,
+      discussions: messagesQuery.isLoading || pinnedQuery.isLoading || decisionsQuery.isLoading,
+      search: searchQuery.isLoading,
+      favorites: favoritesQuery.isLoading,
+      recent: recentQuery.isLoading,
+      workspaceCreate: createWorkspaceMutation.isPending,
+      workspaceUpdate: updateWorkspaceMutation.isPending,
+      workspaceDelete: deleteWorkspaceMutation.isPending,
+      pageCreate: createPageMutation.isPending,
+      pageUpdate: updatePageMutation.isPending,
+      pageDelete: deletePageMutation.isPending,
+      pageArchive: archivePageMutation.isPending,
+      pageUnarchive: unarchivePageMutation.isPending,
+      invite: inviteMutation.isPending,
+      memberRole: updateMemberMutation.isPending,
+      memberRemove: removeMemberMutation.isPending,
+      messageSend: sendMessageMutation.isPending,
+      ai: aiMutation.isPending,
     },
-    [loadDashboard, run],
-  )
-
-  const loadWorkspace = useCallback(
-    async (workspaceId) => {
-      return run('workspace', async () => {
-        const data = await workspaceService.get(workspaceId)
-        const workspace = data?.workspace || data
-        setSelectedWorkspace(workspace)
-        return workspace
-      })
+    errors: {
+      dashboard: dashboardQuery.error?.message || '',
+      workspace: workspaceQuery.error?.message || '',
+      workspacePages: workspacePagesQuery.error?.message || '',
+      page: pageQuery.error?.message || '',
+      members: membersQuery.error?.message || '',
+      discussions: messagesQuery.error?.message || pinnedQuery.error?.message || decisionsQuery.error?.message || '',
+      search: searchQuery.error?.message || '',
+      favorites: favoritesQuery.error?.message || '',
+      recent: recentQuery.error?.message || '',
+      workspaceCreate: mutationState(createWorkspaceMutation).error,
+      workspaceUpdate: mutationState(updateWorkspaceMutation).error,
+      workspaceDelete: mutationState(deleteWorkspaceMutation).error,
+      pageCreate: mutationState(createPageMutation).error,
+      pageUpdate: mutationState(updatePageMutation).error,
+      pageDelete: mutationState(deletePageMutation).error,
+      invite: mutationState(inviteMutation).error,
+      messageSend: mutationState(sendMessageMutation).error,
+      ai: mutationState(aiMutation).error,
     },
-    [run],
-  )
-
-  const updateWorkspace = useCallback(
-    async (workspaceId, payload) => {
-      return run('workspaceUpdate', async () => {
-        const data = await workspaceService.update(workspaceId, payload)
-        const workspace = data?.workspace || data
-        setSelectedWorkspace(workspace)
-        await loadDashboard()
-        return workspace
-      })
-    },
-    [loadDashboard, run],
-  )
-
-  const deleteWorkspace = useCallback(
-    async (workspaceId) => {
-      return run('workspaceDelete', async () => {
-        await workspaceService.remove(workspaceId)
-        setSelectedWorkspace(null)
-        await loadDashboard()
-      })
-    },
-    [loadDashboard, run],
-  )
-
-  const loadMembers = useCallback(
-    async (workspaceId) => {
-      if (!workspaceId) return []
-      return run('members', async () => {
-        const data = await memberService.list(workspaceId)
-        const nextMembers = data?.members || data?.workspace?.members || []
-        setMembers(nextMembers)
-        return nextMembers
-      })
-    },
-    [run],
-  )
-
-  const inviteMember = useCallback(
-    async (workspaceId, payload) => {
-      return run('invite', async () => {
-        const data = await memberService.invite(workspaceId, payload)
-        await loadMembers(workspaceId)
-        return data
-      })
-    },
-    [loadMembers, run],
-  )
-
-  const updateMemberRole = useCallback(
-    async (workspaceId, memberId, role) => {
-      return run('memberRole', async () => {
-        const data = await memberService.updateRole(workspaceId, memberId, { role })
-        await loadMembers(workspaceId)
-        return data
-      })
-    },
-    [loadMembers, run],
-  )
-
-  const removeMember = useCallback(
-    async (workspaceId, memberId) => {
-      return run('memberRemove', async () => {
-        await memberService.remove(workspaceId, memberId)
-        setMembers((current) => current.filter((member) => (member.user?._id || member.user || member._id) !== memberId))
-      })
-    },
-    [run],
-  )
-
-  const createPage = useCallback(
-    async (payload) => {
-      return run('pageCreate', async () => {
-        const data = await pageService.create(payload)
-        const page = data?.page || data
-        setSelectedPage(page)
-        await loadDashboard()
-        return page
-      })
-    },
-    [loadDashboard, run],
-  )
-
-  const loadPage = useCallback(
-    async (pageId) => {
-      return run('page', async () => {
-        const data = await pageService.get(pageId)
-        const page = data?.page || data
-        setSelectedPage(page)
-        return page
-      })
-    },
-    [run],
-  )
-
-  const updatePage = useCallback(
-    async (pageId, payload) => {
-      const data = await pageService.update(pageId, payload)
-      const page = data?.page || data
-      setSelectedPage(page)
-      return page
-    },
-    [],
-  )
-
-  const deletePage = useCallback(
-    async (pageId) => {
-      return run('pageDelete', async () => {
-        await pageService.remove(pageId)
-        setSelectedPage(null)
-        await loadDashboard()
-      })
-    },
-    [loadDashboard, run],
-  )
-
-  const archivePage = useCallback(
-    async (pageId) => {
-      return run('pageArchive', async () => {
-        const data = await pageService.archive(pageId)
-        await loadDashboard()
+    aiResult: aiMutation.data || null,
+    setSelectedWorkspace: selectWorkspace,
+    setSelectedPage: (page) => setSelectedPageId(page?._id || page || ''),
+    setMessages: () => {},
+    setOnlineUsers: () => {},
+    setTypingUsers: () => {},
+    loadDashboard,
+    createWorkspace: (payload) => createWorkspaceMutation.mutateAsync(payload).then((data) => data?.workspace || data),
+    loadWorkspace: (workspaceId) => queryClient.fetchQuery({ queryKey: ['workspace', workspaceId], queryFn: () => workspaceService.get(workspaceId) }).then((data) => data?.workspace || data),
+    updateWorkspace: (workspaceId, payload) => updateWorkspaceMutation.mutateAsync({ workspaceId, payload }).then((data) => data?.workspace || data),
+    deleteWorkspace: (workspaceId) => deleteWorkspaceMutation.mutateAsync(workspaceId),
+    loadMembers: (workspaceId) => queryClient.fetchQuery({ queryKey: ['members', workspaceId], queryFn: () => memberService.list(workspaceId) }).then((data) => data?.members || []),
+    inviteMember: (workspaceId, payload) => inviteMutation.mutateAsync({ workspaceId, payload }),
+    updateMemberRole: (workspaceId, memberId, role) => updateMemberMutation.mutateAsync({ workspaceId, memberId, role }),
+    removeMember: (workspaceId, memberId) => removeMemberMutation.mutateAsync({ workspaceId, memberId }),
+    createPage: (payload) => createPageMutation.mutateAsync(payload).then((data) => data?.page || data),
+    loadPage: (pageId) => {
+      setSelectedPageId(pageId)
+      return queryClient.fetchQuery({ queryKey: ['page', pageId], queryFn: () => pageService.get(pageId) }).then(async (data) => {
+        await pageService.trackRecent(pageId)
+        await queryClient.invalidateQueries({ queryKey: ['recent-pages'] })
         return data?.page || data
       })
     },
-    [loadDashboard, run],
-  )
-
-  const unarchivePage = useCallback(
-    async (pageId) => {
-      return run('pageUnarchive', async () => {
-        const data = await pageService.unarchive(pageId)
-        await loadDashboard()
-        return data?.page || data
-      })
+    loadWorkspacePages: (workspaceId) => queryClient.fetchQuery({ queryKey: ['workspace-pages', workspaceId], queryFn: () => pageService.listByWorkspace(workspaceId) }).then((data) => data?.pages || []),
+    updatePage: (pageId, payload) => updatePageMutation.mutateAsync({ pageId, payload }).then((data) => data?.page || data),
+    deletePage: (pageId, workspaceId = effectiveWorkspaceId) => deletePageMutation.mutateAsync({ pageId, workspaceId }),
+    archivePage: (pageId, workspaceId = effectiveWorkspaceId) => archivePageMutation.mutateAsync({ pageId, workspaceId }),
+    unarchivePage: (pageId, workspaceId = effectiveWorkspaceId) => unarchivePageMutation.mutateAsync({ pageId, workspaceId }),
+    loadDiscussions: async (workspaceId) => {
+      const [messageData, pinnedData, decisionData] = await Promise.all([
+        queryClient.fetchQuery({ queryKey: ['messages', workspaceId], queryFn: () => discussionService.getMessages(workspaceId) }),
+        queryClient.fetchQuery({ queryKey: ['pinned-messages', workspaceId], queryFn: () => discussionService.pinned(workspaceId) }),
+        queryClient.fetchQuery({ queryKey: ['decisions', workspaceId], queryFn: () => discussionService.decisions(workspaceId) }),
+      ])
+      return { messages: messageData?.messages || [], pinnedMessages: pinnedData?.messages || [], decisions: decisionData?.decisions || [] }
     },
-    [loadDashboard, run],
-  )
-
-  const loadDiscussions = useCallback(
-    async (workspaceId) => {
-      if (!workspaceId) return []
-      return run('discussions', async () => {
-        const [messageData, pinnedData, decisionData] = await Promise.all([
-          discussionService.getMessages(workspaceId),
-          discussionService.pinned(workspaceId),
-          discussionService.decisions(workspaceId),
-        ])
-        const nextMessages = messageData?.messages || []
-        setMessages(nextMessages)
-        setPinnedMessages(pinnedData?.messages || [])
-        setDecisions(decisionData?.decisions || [])
-        return nextMessages
-      })
+    sendMessage: (workspaceId, payload) => sendMessageMutation.mutateAsync({ workspaceId, payload }).then((data) => data?.message || data),
+    deleteMessage: (workspaceId, messageId) => deleteMessageMutation.mutateAsync({ workspaceId, messageId }),
+    pinMessage: (workspaceId, messageId, pinned) => pinMessageMutation.mutateAsync({ workspaceId, messageId, pinned }),
+    runSearch: (query) => {
+      setSearchTerm(query?.trim() || '')
+      return queryClient.fetchQuery({ queryKey: ['search', query], queryFn: () => searchService.search(query) })
     },
-    [run],
-  )
-
-  const sendMessage = useCallback(
-    async (workspaceId, payload) => {
-      const optimisticId = `optimistic-${Date.now()}`
-      const optimisticMessage = {
-        _id: optimisticId,
-        ...payload,
-        createdAt: new Date().toISOString(),
-        optimistic: true,
-      }
-      setMessages((current) => [...current, optimisticMessage])
-      try {
-        const data = await discussionService.sendMessage(workspaceId, payload)
-        const message = data?.message || data
-        setMessages((current) => current.map((item) => (item._id === optimisticId ? message : item)))
-        return message
-      } catch (error) {
-        setMessages((current) => current.filter((item) => item._id !== optimisticId))
-        setFailure('messageSend', error)
-        throw error
-      }
-    },
-    [setFailure],
-  )
-
-  const deleteMessage = useCallback(
-    async (workspaceId, messageId) => {
-      const previous = messages
-      setMessages((current) => current.filter((message) => message._id !== messageId))
-      try {
-        await discussionService.deleteMessage(workspaceId, messageId)
-      } catch (error) {
-        setMessages(previous)
-        setFailure('messageDelete', error)
-        throw error
-      }
-    },
-    [messages, setFailure],
-  )
-
-  const pinMessage = useCallback(
-    async (workspaceId, messageId, pinned) => {
-      return run('pinMessage', async () => {
-        const data = pinned ? await discussionService.unpin(workspaceId, messageId) : await discussionService.pin(workspaceId, messageId)
-        await loadDiscussions(workspaceId)
-        return data?.message || data
-      })
-    },
-    [loadDiscussions, run],
-  )
-
-  const runSearch = useCallback(
-    async (query) => {
-      if (!query?.trim()) {
-        setSearchResults(null)
-        return null
-      }
-      return run('search', async () => {
-        const data = await searchService.search(query.trim())
-        setSearchResults(data)
-        return data
-      })
-    },
-    [run],
-  )
-
-  const value = useMemo(
-    () => ({
-      dashboard,
-      selectedWorkspace,
-      selectedPage,
-      members,
-      messages,
-      pinnedMessages,
-      decisions,
-      searchResults,
-      onlineUsers,
-      typingUsers,
-      loading,
-      errors,
-      setSelectedWorkspace,
-      setSelectedPage,
-      setMessages,
-      setOnlineUsers,
-      setTypingUsers,
-      loadDashboard,
-      createWorkspace,
-      loadWorkspace,
-      updateWorkspace,
-      deleteWorkspace,
-      loadMembers,
-      inviteMember,
-      updateMemberRole,
-      removeMember,
-      createPage,
-      loadPage,
-      updatePage,
-      deletePage,
-      archivePage,
-      unarchivePage,
-      loadDiscussions,
-      sendMessage,
-      deleteMessage,
-      pinMessage,
-      runSearch,
-    }),
-    [
-      archivePage,
-      createPage,
-      createWorkspace,
-      dashboard,
-      decisions,
-      deleteMessage,
-      deletePage,
-      deleteWorkspace,
-      errors,
-      inviteMember,
-      loadDashboard,
-      loadDiscussions,
-      loadMembers,
-      loadPage,
-      loadWorkspace,
-      loading,
-      members,
-      messages,
-      onlineUsers,
-      pinMessage,
-      pinnedMessages,
-      removeMember,
-      runSearch,
-      searchResults,
-      selectedPage,
-      selectedWorkspace,
-      sendMessage,
-      typingUsers,
-      unarchivePage,
-      updateMemberRole,
-      updatePage,
-      updateWorkspace,
-    ],
-  )
+    runAiAction: (payload) => aiMutation.mutateAsync(payload),
+    toggleFavoritePage: (pageId, favorite) => favoritePageMutation.mutateAsync({ pageId, favorite }),
+  }), [
+    aiMutation,
+    archivePageMutation,
+    createPageMutation,
+    createWorkspaceMutation,
+    dashboard,
+    dashboardQuery.error,
+    dashboardQuery.isLoading,
+    decisionsQuery.data,
+    decisionsQuery.error,
+    decisionsQuery.isLoading,
+    deleteMessageMutation,
+    deletePageMutation,
+    deleteWorkspaceMutation,
+    effectiveWorkspaceId,
+    favoritePageMutation,
+    favoritesQuery.data,
+    favoritesQuery.error,
+    favoritesQuery.isLoading,
+    inviteMutation,
+    loadDashboard,
+    membersQuery.data,
+    membersQuery.error,
+    membersQuery.isLoading,
+    messagesQuery.data,
+    messagesQuery.error,
+    messagesQuery.isLoading,
+    pageQuery.data,
+    pageQuery.error,
+    pageQuery.isLoading,
+    pinMessageMutation,
+    pinnedQuery.data,
+    pinnedQuery.error,
+    pinnedQuery.isLoading,
+    queryClient,
+    removeMemberMutation,
+    recentQuery.data,
+    recentQuery.error,
+    recentQuery.isLoading,
+    searchQuery.data,
+    searchQuery.error,
+    searchQuery.isLoading,
+    selectWorkspace,
+    selectedPageId,
+    selectedWorkspace,
+    sendMessageMutation,
+    unarchivePageMutation,
+    updateMemberMutation,
+    updatePageMutation,
+    updateWorkspaceMutation,
+    workspacePagesQuery.data,
+    workspacePagesQuery.error,
+    workspacePagesQuery.isLoading,
+    workspaceQuery.error,
+    workspaceQuery.isLoading,
+  ])
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

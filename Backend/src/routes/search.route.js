@@ -12,6 +12,7 @@ router.get("/", authMiddleware, async (req, res) => {
             workspaces: [],
             pages: [],
             discussions: [],
+            members: [],
             pinnedMessages: [],
             decisions: []
         });
@@ -43,7 +44,7 @@ router.get("/", authMiddleware, async (req, res) => {
             { owner: userId },
             { "members.user": userId }
         ]
-    }).select("_id");
+    }).populate("members.user", "username email");
     const accessibleWorkspaceIds = accessibleWorkspaces.map((workspace) => workspace._id);
 
     const pages = await Page.find({
@@ -59,6 +60,24 @@ router.get("/", authMiddleware, async (req, res) => {
         content: filter
     }).limit(20).populate({ path: "sender", select: "username email" });
 
+    const memberMap = new Map();
+    accessibleWorkspaces.forEach((workspace) => {
+        (workspace.members || []).forEach((member) => {
+            const user = member.user;
+            const name = user?.username || "";
+            const email = user?.email || "";
+            if (user && (filter.test(name) || filter.test(email))) {
+                memberMap.set(user._id.toString(), {
+                    _id: user._id,
+                    username: user.username,
+                    email: user.email,
+                    role: member.role,
+                    workspace: workspace._id
+                });
+            }
+        });
+    });
+
     const pinnedMessages = discussions.filter((message) => message.isPinned);
     const decisions = discussions.filter((message) => message.type === "decision");
 
@@ -66,6 +85,7 @@ router.get("/", authMiddleware, async (req, res) => {
         workspaces,
         pages,
         discussions,
+        members: Array.from(memberMap.values()),
         pinnedMessages,
         decisions,
         workspaceIds

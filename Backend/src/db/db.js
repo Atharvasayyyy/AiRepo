@@ -1,34 +1,20 @@
 const mongoose = require("mongoose");
+const { config } = require("../config/env");
 
 const connecttodb = async () => {
     try {
-        console.log("MONGO_URL =", process.env.MONGO_URL);
-        console.log("MONGO_URI =", process.env.MONGO_URI);
-
-        const rawMongoUri =
-            process.env.MONGO_URL ||
-            process.env.MONGO_URI;
-
-        if (!rawMongoUri) {
-            throw new Error(
-                "Missing Mongo URI. Set MONGO_URL in .env"
-            );
-        }
-
-        console.log("Connecting to:");
-        console.log(rawMongoUri);
-
-        await mongoose.connect(rawMongoUri, {
+        await mongoose.connect(config.mongoUrl, {
             serverSelectionTimeoutMS: 10000
         });
 
-        console.log("MongoDB connected successfully");
+        if (config.env !== "production") {
+            console.log("MongoDB connected successfully");
+        }
 
     } catch (error) {
-        console.error("Error connecting to MongoDB:");
-        console.error(error);
+        console.error("Error connecting to MongoDB:", error.message);
 
-        process.exit(1); // only exit when connection fails
+        process.exit(1);
     }
 };
 

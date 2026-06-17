@@ -26,6 +26,7 @@ new mongoose.Schema(
         enum: [
             "message",
             "ai",
+            "ai_message",
             "decision",
             "system"
         ],
