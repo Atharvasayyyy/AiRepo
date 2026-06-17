@@ -32,6 +32,19 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.get("/", (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: "DevNotes Backend Running"
+    });
+});
+
+app.get("/health", (req, res) => {
+    res.status(200).json({
+        success: true,
+        status: "healthy"
+    });
+});
 
 app.use('/test', (req, res) => {
     res.send('Hello World');
