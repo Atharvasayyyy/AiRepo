@@ -8,7 +8,6 @@
     "backend:start": "cd Backend && npm start",
     "frontend:install": "cd Frontend && npm ci",
     "frontend:build": "cd Frontend && npm run build",
-    "dev": "vite",
     "build": "npm run frontend:build",
     "start": "npm run backend:start"
   },
