@@ -2,7 +2,21 @@ const http = require("http");
 const dotenv = require("dotenv");
 const { Server } = require("socket.io");
 
-dotenv.config();
+process.on("uncaughtException", (err) => {
+    console.error("UNCAUGHT EXCEPTION:");
+    console.error(err);
+});
+
+process.on("unhandledRejection", (err) => {
+    console.error("UNHANDLED REJECTION:");
+    console.error(err);
+});
+
+const path = require("path");
+
+dotenv.config({
+    path: path.join(__dirname, ".env")
+});
 
 const connecttodb = require("./src/db/db");
 const app = require("./src/app");
@@ -43,6 +57,10 @@ io.on("connection", (socket) => {
 
 const PORT =
     process.env.PORT || 5000;
+
+console.log("PORT =", process.env.PORT);
+console.log("MONGO_URL =", process.env.MONGO_URL);
+console.log("__dirname =", __dirname);
 
 server.listen(PORT, () => {
     console.log(
