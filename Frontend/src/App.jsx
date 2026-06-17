@@ -474,6 +474,7 @@ function Playground({ path, navigate }) {
   const [status, setStatusMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [modal, setModal] = useState(null)
+  const [hubOpen, setHubOpen] = useState(true)
   const mode = getPlaygroundMode(path)
   const workspaceList = dashboard.ownedWorkspaces || []
   const sharedWorkspaces = dashboard.sharedWorkspaces || []
@@ -689,8 +690,17 @@ function Playground({ path, navigate }) {
         onOpenModal={setModal}
         onSelectWorkspace={handleWorkspaceSelect}
       />
-      <main className="flex-1 min-w-0 flex flex-col bg-white">
-        <WorkspaceTopbar activeDoc={activeDoc} user={user} onlineUsers={onlineUsers} autosave={autosave} onLogout={logout} onProfile={() => navigate('/profile')} />
+      <main className="hub-transition flex-1 min-w-0 flex flex-col bg-white">
+        <WorkspaceTopbar
+          activeDoc={activeDoc}
+          user={user}
+          onlineUsers={onlineUsers}
+          autosave={autosave}
+          messageCount={messages.length}
+          onLogout={logout}
+          onProfile={() => navigate('/profile')}
+          onToggleHub={() => setHubOpen((value) => !value)}
+        />
         {mode === 'workspace-new' && (
           <WorkspaceCreatePanel workspace={workspace} onChange={setWorkspace} onSubmit={submitWorkspace} busy={busy || loading.workspaceCreate} status={status || errors.workspaceCreate} />
         )}
@@ -732,24 +742,29 @@ function Playground({ path, navigate }) {
             onArchivePage={() => pageId && archivePage(pageId)}
             onUnarchivePage={() => pageId && unarchivePage(pageId)}
             autosave={autosave}
+            onAskAi={async (prompt) => {
+              if (!activeWorkspaceId) return
+              const message = await sendMessage(activeWorkspaceId, { content: prompt, type: 'message' })
+              sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
+              setHubOpen(true)
+            }}
           />
         )}
       </main>
-      <WorkspaceAiPanel
-        workspaceId={activeWorkspaceId}
-        onPrompt={async (prompt) => {
-          if (!activeWorkspaceId) return
-          const message = await sendMessage(activeWorkspaceId, { content: prompt, type: 'message' })
-          sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
-        }}
-      />
-      <DiscussionDrawer
+      <DiscussionHub
+        open={hubOpen}
         workspaceId={activeWorkspaceId}
         messages={messages}
         pinnedMessages={pinnedMessages}
         decisions={decisions}
         typingUsers={typingUsers}
         currentUser={user}
+        onClose={() => setHubOpen(false)}
+        onPrompt={async (prompt) => {
+          if (!activeWorkspaceId) return
+          const message = await sendMessage(activeWorkspaceId, { content: prompt, type: 'message' })
+          sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
+        }}
         onSend={async (payload) => {
           const message = await sendMessage(activeWorkspaceId, payload)
           sendRealtimeMessage({ workspaceId: activeWorkspaceId, message })
@@ -809,7 +824,7 @@ function WorkspaceSidebar({
   }, [debouncedQuery, onSearch])
 
   return (
-    <aside className="hidden lg:flex w-[280px] flex-shrink-0 bg-surface-container-low border-r border-outline-variant flex-col z-50">
+    <aside className="hidden lg:flex w-[20%] min-w-[240px] max-w-[300px] flex-shrink-0 bg-surface-container-low border-r border-outline-variant flex-col z-50 overflow-hidden">
       <div className="p-5 flex items-center justify-between">
         <button className="flex items-center gap-2 text-left" type="button" onClick={() => navigate('/dashboard')}>
           <span className="w-9 h-9 rounded-xl bg-primary flex items-center justify-center text-white shadow-lg shadow-primary/20">
@@ -834,7 +849,7 @@ function WorkspaceSidebar({
             <div className="mx-3 mt-2 rounded-lg border border-outline-variant/40 bg-white p-2 text-xs text-on-surface-variant">
               {Object.entries(searchResults).flatMap(([type, values]) => (Array.isArray(values) ? values.map((item) => ({ type, item })) : [])).slice(0, 4).map(({ type, item }) => (
                 <button className="block w-full rounded px-2 py-1 text-left hover:bg-surface-container-low" key={`${type}-${getId(item) || item.title || item.name}`} type="button" onClick={() => navigate(type.includes('page') ? `/pages/${getId(item)}` : `/workspaces/${getId(item)}`)}>
-                  <span className="font-bold capitalize">{type}</span> Â· {item.title || item.name || item.content}
+                  <span className="font-bold capitalize">{type}</span> · {item.title || item.name || item.content}
                 </button>
               ))}
             </div>
@@ -846,7 +861,7 @@ function WorkspaceSidebar({
 
         <div className="space-y-1">
           <h3 className="px-3 text-[10px] font-bold text-outline uppercase tracking-widest mb-2 flex justify-between items-center">
-            Owned Workspaces
+            Owned
             <button className="hover:text-primary" type="button" onClick={() => onOpenModal?.('create-workspace')}>
               <span className="material-symbols-outlined text-[14px]">add</span>
             </button>
@@ -975,7 +990,7 @@ function SidebarItem({ active, icon, label, method, shortcut, onClick }) {
   )
 }
 
-function WorkspaceTopbar({ activeDoc, user, onlineUsers = [], autosave, onLogout, onProfile }) {
+function WorkspaceTopbar({ activeDoc, user, onlineUsers = [], autosave, messageCount = 0, onLogout, onProfile, onToggleHub }) {
   return (
     <header className="h-auto min-h-16 px-4 sm:px-6 border-b border-outline-variant bg-white/95 backdrop-blur-md sticky top-0 z-40 flex flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between">
       <div className="flex items-center gap-4 min-w-0">
@@ -995,16 +1010,21 @@ function WorkspaceTopbar({ activeDoc, user, onlineUsers = [], autosave, onLogout
         </div>
       </div>
       <div className="flex items-center justify-between md:justify-end gap-3">
-        <div className="hidden lg:flex items-center gap-4 text-xs text-outline">
-          <div className="flex items-center gap-1.5">
-            <span className="material-symbols-outlined text-[16px]">history</span>
-            <span>{activeDoc.updatedAt ? `Updated ${formatDate(activeDoc.updatedAt)}` : 'No updates yet'}</span>
+        <div className="hidden lg:flex items-center gap-3 text-xs text-outline border-r border-outline-variant/30 pr-5">
+          <div className="flex -space-x-2">
+            <span className="w-8 h-8 rounded-full bg-primary text-white text-[10px] font-bold border-2 border-white flex items-center justify-center">{initials(user)}</span>
+            {onlineUsers.slice(0, 1).map((onlineUser) => (
+              <span className="w-8 h-8 rounded-full bg-surface-container border-2 border-white flex items-center justify-center text-[10px] font-bold text-outline" key={getId(onlineUser) || displayUser(onlineUser)}>
+                {initials(onlineUser)}
+              </span>
+            ))}
+            {onlineUsers.length > 1 && <span className="w-8 h-8 rounded-full bg-surface-container border-2 border-white flex items-center justify-center text-[10px] font-bold text-outline">+{onlineUsers.length - 1}</span>}
           </div>
-          <div className="flex items-center gap-1.5 bg-green-50 text-green-700 px-2 py-0.5 rounded-full font-medium border border-green-100">
+          <div className="flex items-center gap-1.5 text-green-700 font-medium">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 presence-pulse"></span>
-            <span>{onlineUsers.length || 1} Online</span>
+            <span>Live</span>
           </div>
-          <span>{autosave?.saving ? 'Saving...' : autosave?.savedAt ? `Saved ${autosave.savedAt.toLocaleTimeString()}` : 'Saved'}</span>
+          <span>{autosave?.saving ? 'Saving...' : autosave?.savedAt ? `Saved ${autosave.savedAt.toLocaleTimeString()}` : activeDoc.updatedAt ? `Updated ${formatDate(activeDoc.updatedAt)}` : 'Saved'}</span>
         </div>
         <div className="hidden sm:flex items-center gap-1 bg-surface-container-low p-1 rounded-lg">
           <button className="p-1.5 rounded hover:bg-white text-outline hover:text-primary transition-all" title="Tasks" type="button"><span className="material-symbols-outlined text-[18px]">task_alt</span></button>
@@ -1014,8 +1034,9 @@ function WorkspaceTopbar({ activeDoc, user, onlineUsers = [], autosave, onLogout
         <button className="px-4 py-1.5 bg-primary text-white font-bold rounded-lg hover:shadow-lg hover:shadow-primary/20 transition-all text-sm" type="button">
           Share
         </button>
-        <button className="p-2 hover:bg-surface-container rounded-lg text-on-surface-variant transition-colors" title="AI Actions" type="button">
-          <span className="material-symbols-outlined">auto_awesome</span>
+        <button className="p-2 hover:bg-surface-container rounded-lg text-on-surface-variant transition-colors relative" title="Discussion Hub" type="button" onClick={onToggleHub}>
+          <span className="material-symbols-outlined">forum</span>
+          {messageCount > 0 && <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-error border-2 border-white rounded-full"></span>}
         </button>
         <button className="hidden sm:flex items-center gap-2 p-1.5 hover:bg-surface-container rounded-lg text-on-surface-variant transition-colors" title="Profile" type="button" onClick={onProfile}>
           <span className="w-7 h-7 rounded-full bg-primary text-white text-xs font-bold flex items-center justify-center">{initials(user)}</span>
@@ -1047,10 +1068,11 @@ function DashboardHome({
   onArchivePage,
   onUnarchivePage,
   autosave,
+  onAskAi,
 }) {
   return (
     <div className="flex-1 overflow-y-auto no-scrollbar scroll-smooth bg-white">
-      <div className="max-w-[860px] mx-auto pt-6 sm:pt-8 px-4 sm:px-8">
+      <div className="max-w-[800px] mx-auto pt-8 sm:pt-12 pb-24 px-4 sm:px-8">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-8 p-3 bg-primary/5 rounded-xl border border-primary/10">
           <div className="flex items-center gap-3 min-w-0">
             <span className="material-symbols-outlined text-primary text-[20px]">bolt</span>
@@ -1071,20 +1093,23 @@ function DashboardHome({
           </div>
         </div>
 
-        <div className="mb-10 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div className="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div className="flex-1 min-w-0">
             <input
-              className="w-full bg-transparent font-display-lg text-4xl sm:text-display-lg text-on-surface mb-3 leading-tight outline-none"
+              className="w-full bg-transparent font-display-lg text-4xl sm:text-display-lg text-on-surface mb-6 leading-tight outline-none"
               value={pageForm.title || activeDoc.pageTitle || ''}
               onChange={(event) => onPageChange((current) => ({ ...current, title: event.target.value }))}
               placeholder="Untitled page"
             />
-            <textarea
-              className="w-full min-h-28 resize-none bg-transparent text-body-lg text-on-surface-variant leading-relaxed outline-none"
-              value={pageForm.content || activeDoc.pageContent || ''}
-              onChange={(event) => onPageChange((current) => ({ ...current, content: event.target.value }))}
-              placeholder="Start writing..."
-            />
+            <div className="relative group mb-2 pl-1">
+              <div className="absolute -left-4 top-0 h-full w-1 bg-pink-500/20 rounded-full"></div>
+              <textarea
+                className="w-full min-h-28 resize-none bg-transparent text-body-lg text-on-surface-variant leading-relaxed font-medium outline-none"
+                value={pageForm.content || activeDoc.pageContent || ''}
+                onChange={(event) => onPageChange((current) => ({ ...current, content: event.target.value }))}
+                placeholder="Start writing..."
+              />
+            </div>
             <div className="mt-3 flex flex-wrap gap-3 text-[11px] text-outline">
               <span>Created by {displayUser(activeDoc.createdBy)}</span>
               <span>Modified by {displayUser(activeDoc.modifiedBy)}</span>
@@ -1101,6 +1126,59 @@ function DashboardHome({
             <button className="px-3 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={onArchivePage}>Archive</button>
             <button className="px-3 py-2.5 rounded-lg border border-outline-variant text-sm font-bold" type="button" onClick={onUnarchivePage}>Restore</button>
             <button className="px-3 py-2.5 rounded-lg border border-[#f1b5b5] text-[#b42318] text-sm font-bold" type="button" onClick={onDeletePage}>Delete</button>
+          </div>
+        </div>
+
+        <section className="space-y-6 mb-12">
+          <h3 className="font-bold text-on-surface flex items-center gap-2 text-xl">
+            <span className="material-symbols-outlined text-primary">checklist</span>
+            Key Milestones
+          </h3>
+          <div className="space-y-3">
+            <div className="flex items-center gap-4 group p-3 hover:bg-surface-container-low rounded-xl transition-colors">
+              <span className="w-6 h-6 rounded-md border-2 border-outline-variant flex items-center justify-center bg-white group-hover:border-primary">
+                <span className="material-symbols-outlined text-[16px] text-primary opacity-0 group-hover:opacity-100">check</span>
+              </span>
+              <span className="text-on-surface font-medium">Alpha Release: Core Editor Modules</span>
+            </div>
+            <div className="flex items-center gap-4 p-3 bg-surface-container-low/50 rounded-xl">
+              <span className="w-6 h-6 rounded-md border-2 border-primary flex items-center justify-center bg-primary">
+                <span className="material-symbols-outlined text-[16px] text-white">check</span>
+              </span>
+              <span className="text-outline line-through font-medium italic">Draft API Documentation Specs</span>
+              <span className="ml-auto text-[10px] text-outline font-bold uppercase tracking-widest">Completed</span>
+            </div>
+          </div>
+        </section>
+
+        <div className="my-12 p-5 sm:p-8 bg-surface-container-low rounded-2xl border border-outline-variant/30 relative overflow-hidden group">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
+              <span className="material-symbols-outlined">sports_esports</span>
+            </div>
+            <h3 className="font-bold text-on-surface text-xl">Team Chess Break</h3>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2">
+            <div className="aspect-square bg-surface border-2 border-outline-variant rounded-lg flex items-center justify-center relative overflow-hidden">
+              <div className="grid grid-cols-8 grid-rows-8 w-full h-full opacity-50">
+                {Array.from({ length: 64 }).map((_, index) => (
+                  <span className={(Math.floor(index / 8) + index) % 2 === 0 ? 'bg-surface-container' : ''} key={index}></span>
+                ))}
+              </div>
+              <div className="absolute inset-0 flex items-center justify-center px-3 text-center">
+                <span className="text-outline text-xs font-bold uppercase tracking-widest">Active Game: {displayUser(activeDoc.modifiedBy)} vs AI</span>
+              </div>
+            </div>
+            <div className="flex flex-col justify-center gap-3">
+              <button className="w-full px-4 py-2 bg-white border border-outline-variant rounded-lg text-sm font-bold hover:bg-surface-container-low transition-colors flex items-center justify-center gap-2" type="button">
+                <span className="material-symbols-outlined text-[18px]">undo</span>
+                Undo Move
+              </button>
+              <button className="w-full px-4 py-2 bg-primary text-white rounded-lg text-sm font-bold hover:shadow-lg transition-all flex items-center justify-center gap-2" type="button" onClick={() => onAskAi?.('@AI what is the best move here?')}>
+                <span className="material-symbols-outlined text-[18px]">lightbulb</span>
+                Ask AI for Move
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1314,79 +1392,31 @@ function SubmitRow({ busy, status, label, onClick }) {
   )
 }
 
-function WorkspaceAiPanel({ workspaceId, onPrompt }) {
-  const [ask, setAsk] = useState('')
-  const quickActions = [
-    ['summarize', 'Summarize', '@AI summarize page'],
-    ['playlist_add_check', 'Generate Tasks', '@AI generate tasks'],
-    ['decision_making', 'Extract Decisions', '@AI extract decisions'],
-    ['auto_fix_high', 'Rewrite Content', '@AI rewrite content'],
-    ['edit_note', 'Create Meeting Notes', '@AI create meeting notes'],
-    ['psychology', 'Explain Architecture', '@AI explain architecture'],
-  ]
-
-  const submitPrompt = async (prompt) => {
-    if (!workspaceId || !prompt.trim()) return
-    await onPrompt(prompt.trim())
-    setAsk('')
-  }
-
-  return (
-    <aside className="hidden xl:flex w-[350px] flex-shrink-0 bg-surface border-l border-outline-variant flex-col z-50">
-      <div className="h-16 flex items-center justify-between px-6 border-b border-outline-variant bg-white">
-        <div className="flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>auto_awesome</span>
-          <h3 className="font-bold text-on-surface">AI Workspace Assistant</h3>
-        </div>
-        <button className="p-1.5 hover:bg-surface-container rounded-full text-outline" type="button">
-          <span className="material-symbols-outlined text-[20px]">more_vert</span>
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto p-6 space-y-6 no-scrollbar">
-        <div>
-          <h4 className="text-[10px] font-bold text-outline uppercase tracking-widest mb-4">Quick Intelligence</h4>
-          <div className="grid grid-cols-2 gap-3">
-            {quickActions.map(([icon, label, prompt]) => (
-              <button className="flex flex-col items-start p-3 bg-white border border-outline-variant hover:border-primary hover:bg-primary/5 rounded-xl transition-all group" key={label} type="button" onClick={() => submitPrompt(prompt)}>
-                <span className="material-symbols-outlined text-outline group-hover:text-primary mb-2">{icon}</span>
-                <span className="text-xs font-bold">{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-4">
-          <h4 className="text-[10px] font-bold text-outline uppercase tracking-widest">Active Context</h4>
-          <div className="p-4 bg-primary/5 rounded-2xl border border-primary/10">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-5 h-5 bg-primary rounded-full flex items-center justify-center">
-                <span className="material-symbols-outlined text-[12px] text-white">smart_toy</span>
-              </div>
-              <span className="text-[11px] font-bold text-primary">AI Assistant</span>
-            </div>
-            <p className="text-xs text-on-surface-variant leading-relaxed">
-              AI requests are sent as normal discussion messages with @AI prompts. Backend responses appear in the discussion stream as AI Assistant messages.
-            </p>
-          </div>
-        </div>
-      </div>
-      <div className="p-6 border-t border-outline-variant bg-white">
-        <div className="relative">
-          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary font-bold text-sm pointer-events-none">@AI</span>
-          <input className="w-full pl-14 pr-12 py-3 bg-surface-container-low border border-outline-variant rounded-2xl focus:ring-2 focus:ring-primary focus:border-primary outline-none text-sm font-medium transition-all" placeholder="Ask anything..." type="text" value={ask} onChange={(event) => setAsk(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void submitPrompt(`@AI ${ask}`) }} />
-          <button className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-primary text-white rounded-xl shadow-lg shadow-primary/20 hover:scale-105 transition-transform" type="button" onClick={() => submitPrompt(`@AI ${ask}`)}>
-            <span className="material-symbols-outlined text-[20px]">arrow_upward</span>
-          </button>
-        </div>
-        <p className="text-[10px] text-outline mt-3 text-center">All AI actions insert prompts into <span className="font-bold text-on-surface">Team Discussion</span>.</p>
-      </div>
-    </aside>
-  )
-}
-
-function DiscussionDrawer({ workspaceId, messages = [], pinnedMessages = [], decisions = [], typingUsers = [], currentUser, onSend, onDelete, onPin, onTyping, onStopTyping }) {
-  const [open, setOpen] = useState(false)
+function DiscussionHub({
+  open,
+  workspaceId,
+  messages = [],
+  pinnedMessages = [],
+  decisions = [],
+  typingUsers = [],
+  currentUser,
+  onClose,
+  onPrompt,
+  onSend,
+  onDelete,
+  onPin,
+  onTyping,
+  onStopTyping,
+}) {
   const [content, setContent] = useState('')
   const [replyTo, setReplyTo] = useState(null)
+  const [tab, setTab] = useState('messages')
+  const quickActions = [
+    ['summarize', 'Summarize', '@AI summarize this document'],
+    ['checklist', 'Tasks', '@AI generate tasks from document'],
+    ['decision_making', 'Decisions', '@AI extract decisions'],
+    ['auto_fix_high', 'PRD', '@AI generate a PRD'],
+  ]
 
   const submit = async () => {
     if (!workspaceId || !content.trim()) return
@@ -1396,67 +1426,117 @@ function DiscussionDrawer({ workspaceId, messages = [], pinnedMessages = [], dec
     onStopTyping?.()
   }
 
+  const triggerPrompt = async (prompt) => {
+    if (!workspaceId) return
+    setContent(prompt)
+    await onPrompt(prompt)
+  }
+
+  if (!open) return null
+
   return (
-    <div className="hidden md:flex fixed bottom-6 right-6 xl:right-[380px] w-80 bg-white rounded-2xl shadow-2xl border border-outline-variant z-[60] flex-col max-h-[620px] overflow-hidden ai-glow">
-      <button className="flex items-center justify-between p-4 hover:bg-surface-container-low transition-colors w-full text-left" type="button" onClick={() => setOpen((value) => !value)}>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <span className="material-symbols-outlined text-primary">forum</span>
-            <span className="absolute -top-1 -right-1 w-4 h-4 bg-error text-white text-[9px] font-bold rounded-full flex items-center justify-center border-2 border-white">{messages.length}</span>
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-on-surface">Team Discussion</h3>
-            <p className="text-[10px] text-green-600 font-bold">{typingUsers.length ? `${typingUsers.map(displayUser).join(', ')} typing...` : workspaceId ? 'Live workspace room' : 'Select workspace'}</p>
+    <aside className="hidden lg:flex w-[25%] min-w-[320px] max-w-[420px] flex-shrink-0 bg-white border-l border-outline-variant flex-col z-50 hub-transition">
+      <div className="flex flex-col">
+        <div className="h-16 flex items-center justify-between px-6 border-b border-outline-variant">
+          <h3 className="font-bold text-on-surface flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>forum</span>
+            Discussion Hub
+          </h3>
+          <button className="p-1 hover:bg-surface-container rounded-md text-outline" type="button" onClick={onClose}>
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        <div className="flex border-b border-outline-variant/30">
+          {[
+            ['messages', 'Messages'],
+            ['pinned', 'Pinned'],
+            ['decisions', 'Decisions'],
+          ].map(([key, label]) => (
+            <button className={`flex-1 py-3 text-xs font-bold transition-colors ${tab === key ? 'text-primary border-b-2 border-primary bg-primary/5' : 'text-outline hover:text-on-surface'}`} key={key} type="button" onClick={() => setTab(key)}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 no-scrollbar">
+        <div className="bg-surface-container-low/50 p-4 rounded-xl border border-outline-variant/30">
+          <h4 className="text-[10px] font-bold text-outline uppercase tracking-widest mb-3">AI Quick Actions</h4>
+          <div className="grid grid-cols-2 gap-2">
+            {quickActions.map(([icon, label, prompt]) => (
+              <button className="flex items-center gap-2 p-2 bg-white border border-outline-variant hover:border-primary rounded-lg transition-all group" key={label} type="button" onClick={() => triggerPrompt(prompt)}>
+                <span className="material-symbols-outlined text-[16px] text-outline group-hover:text-primary">{icon}</span>
+                <span className="text-[10px] font-bold">{label}</span>
+              </button>
+            ))}
           </div>
         </div>
-        <span className="material-symbols-outlined text-outline">{open ? 'expand_more' : 'expand_less'}</span>
-      </button>
-      {open && (
-        <div className="flex-1 flex flex-col border-t border-outline-variant min-h-0">
-          <div className="p-4 space-y-4 overflow-y-auto no-scrollbar h-96 bg-surface-container-low/30">
-            <SectionBlock title="Pinned" icon="push_pin" items={pinnedMessages} empty="No pinned messages." />
-            <SectionBlock title="Decisions" icon="gavel" items={decisions} empty="No decisions yet." />
+
+        {tab === 'pinned' && <HubList title="Pinned Messages" items={pinnedMessages} empty="No pinned messages." />}
+        {tab === 'decisions' && <HubList title="Decisions" items={decisions} empty="No decisions yet." />}
+
+        {tab === 'messages' && (
+          <div className="space-y-4">
             {messages.length === 0 ? <p className="text-xs text-on-surface-variant">No messages yet.</p> : messages.map((message) => (
-              <div className="flex gap-2" key={message._id || message.createdAt}>
-                <div className={`${message.type === 'ai' || message.content?.startsWith('@AI') ? 'bg-primary' : 'bg-pink-500'} w-6 h-6 rounded-full text-white flex items-center justify-center text-[10px] font-bold`}>{message.type === 'ai' ? 'AI' : initials(message.sender || currentUser)}</div>
-                <div className={`flex-1 p-3 rounded-2xl rounded-tl-none shadow-sm border border-outline-variant/30 ${message.type === 'ai' ? 'bg-primary/5' : 'bg-white'}`}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <p className="text-[11px] font-bold text-on-surface">{message.type === 'ai' ? 'AI Assistant' : displayUser(message.sender || currentUser)}</p>
-                    <span className="text-[10px] text-outline">{formatDate(message.createdAt)}</span>
-                    {message.isPinned && <span className="text-[9px] font-bold text-primary">Pinned</span>}
+              <div className="flex gap-2.5" key={message._id || message.createdAt}>
+                <div className={`${message.type === 'ai' || message.content?.startsWith('@AI') ? 'bg-primary shadow-md' : 'bg-surface-container-high'} w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold ${message.type === 'ai' || message.content?.startsWith('@AI') ? 'text-white' : 'text-primary'} flex-shrink-0`}>
+                  {message.type === 'ai' || message.content?.startsWith('@AI') ? <span className="material-symbols-outlined text-[16px]">smart_toy</span> : initials(message.sender || currentUser)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1 gap-2">
+                    <span className={`text-xs font-bold truncate ${message.type === 'ai' || message.content?.startsWith('@AI') ? 'text-primary' : 'text-on-surface'}`}>{message.type === 'ai' || message.content?.startsWith('@AI') ? 'DevBot Assistant' : displayUser(message.sender || currentUser)}</span>
+                    <span className="text-[9px] text-outline flex-shrink-0">{formatDate(message.createdAt)}</span>
                   </div>
-                  {message.replyTo && <p className="mb-1 text-[10px] text-outline">Replying to {displayUser(message.replyTo.sender)}</p>}
-                  <p className="text-[12px] text-on-surface-variant whitespace-pre-wrap">{message.content}</p>
-                  <div className="mt-2 flex gap-2 text-[10px] font-bold text-outline">
-                    <button type="button" onClick={() => setReplyTo(message)}>Reply</button>
-                    <button type="button" onClick={() => onPin(message._id, message.isPinned)}>{message.isPinned ? 'Unpin' : 'Pin'}</button>
-                    <button type="button" onClick={() => onDelete(message._id)}>Delete</button>
+                  <div className={`px-3 py-2 rounded-2xl rounded-tl-none border shadow-sm relative overflow-hidden ${message.type === 'ai' || message.content?.startsWith('@AI') ? 'bg-primary/5 border-primary/20' : 'bg-surface-container border-outline-variant/30'}`}>
+                    {(message.type === 'ai' || message.content?.startsWith('@AI')) && <div className="absolute top-0 left-0 w-1 h-full bg-primary/20"></div>}
+                    {message.replyTo && <p className="mb-1 text-[10px] text-outline">Replying to {displayUser(message.replyTo.sender)}</p>}
+                    <p className="text-xs text-on-surface-variant leading-relaxed whitespace-pre-wrap">{message.content}</p>
+                    <div className="mt-2 flex gap-2 text-[9px] font-bold text-outline">
+                      <button type="button" onClick={() => setReplyTo(message)}>Reply</button>
+                      <button type="button" onClick={() => onPin(message._id, message.isPinned)}>{message.isPinned ? 'Unpin' : 'Pin'}</button>
+                      <button type="button" onClick={() => onDelete(message._id)}>Delete</button>
+                    </div>
                   </div>
                 </div>
               </div>
             ))}
+            {typingUsers.length > 0 && (
+              <div className="flex items-center gap-2 text-primary animate-pulse ml-9">
+                <div className="flex gap-1"><span className="w-1 h-1 bg-primary rounded-full"></span><span className="w-1 h-1 bg-primary rounded-full"></span><span className="w-1 h-1 bg-primary rounded-full"></span></div>
+                <span className="text-[9px] font-bold">{typingUsers.map(displayUser).join(', ')} typing...</span>
+              </div>
+            )}
           </div>
-          <div className="p-3 border-t border-outline-variant bg-white space-y-2">
-            {replyTo && <div className="text-[10px] text-outline flex justify-between"><span>Replying to {displayUser(replyTo.sender)}</span><button type="button" onClick={() => setReplyTo(null)}>Cancel</button></div>}
-            <div className="flex items-center gap-2">
-              <input className="flex-1 bg-surface-container px-3 py-2 rounded-xl text-xs outline-none" placeholder="Reply to team or mention @AI..." value={content} onChange={(event) => { setContent(event.target.value); onTyping?.() }} onBlur={onStopTyping} onKeyDown={(event) => { if (event.key === 'Enter') void submit() }} />
-              <button className="p-2 text-primary hover:bg-primary/5 rounded-lg transition-colors" type="button" onClick={submit}><span className="material-symbols-outlined text-[20px]">send</span></button>
-            </div>
-          </div>
+        )}
+      </div>
+
+      <div className="p-4 border-t border-outline-variant bg-white">
+        {replyTo && <div className="mb-2 text-[10px] text-outline flex justify-between"><span>Replying to {displayUser(replyTo.sender)}</span><button type="button" onClick={() => setReplyTo(null)}>Cancel</button></div>}
+        <div className="relative">
+          <textarea className="w-full pl-4 pr-12 py-3 bg-surface-container-low border border-outline-variant rounded-xl focus:ring-2 focus:ring-primary focus:border-primary outline-none text-xs font-medium transition-all resize-none max-h-24 no-scrollbar" placeholder="Message team or @AI..." rows="1" value={content} onBlur={onStopTyping} onChange={(event) => { setContent(event.target.value); onTyping?.() }} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit() } }} />
+          <button className="absolute right-2 bottom-2 p-1.5 bg-primary text-white rounded-lg shadow-lg hover:scale-105 transition-transform" type="button" onClick={submit}>
+            <span className="material-symbols-outlined text-[18px]">send</span>
+          </button>
         </div>
-      )}
-    </div>
+        <p className="text-[9px] text-outline mt-2 text-center">Type <span className="font-bold text-primary">@AI</span> to trigger workspace intelligence.</p>
+      </div>
+    </aside>
   )
 }
 
-function SectionBlock({ title, icon, items, empty }) {
+function HubList({ title, items, empty }) {
   return (
-    <div className="p-2 bg-amber-50 rounded-lg border border-amber-200 text-[11px] space-y-1">
-      <div className="flex items-center gap-2 font-bold text-amber-800">
-        <span className="material-symbols-outlined text-amber-600 text-[14px]">{icon}</span>
-        <span>{title}</span>
-      </div>
-      {items.length === 0 ? <p className="text-amber-800/70">{empty}</p> : items.slice(0, 3).map((item) => <p className="text-amber-800 truncate" key={item._id}>{item.content}</p>)}
+    <div className="space-y-3">
+      <h4 className="text-[10px] font-bold text-outline uppercase tracking-widest">{title}</h4>
+      {items.length === 0 ? <p className="text-xs text-on-surface-variant">{empty}</p> : items.map((item) => (
+        <div className="bg-surface-container px-3 py-2 rounded-2xl border border-outline-variant/30 shadow-sm" key={item._id || item.content}>
+          <div className="flex items-center justify-between mb-1 gap-2">
+            <span className="text-xs font-bold text-on-surface truncate">{displayUser(item.sender)}</span>
+            <span className="text-[9px] text-outline flex-shrink-0">{formatDate(item.createdAt)}</span>
+          </div>
+          <p className="text-xs text-on-surface-variant leading-relaxed truncate">{item.content}</p>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1612,6 +1692,7 @@ function methodClass(method) {
 }
 
 export default App
+
 
 
 

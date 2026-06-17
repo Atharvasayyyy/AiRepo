@@ -364,6 +364,10 @@ input {
   animation: steady-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+.hub-transition {
+  transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), flex-basis 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 @keyframes steady-pulse {
   0%,
   100% {
